@@ -71,6 +71,63 @@ input {
   padding: 28px 0 48px;
 }
 
+.auth-loading,
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-loading {
+  color: var(--text-muted);
+}
+
+.auth-panel {
+  width: min(560px, 100%);
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.auth-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.auth-form {
+  display: grid;
+  gap: 10px;
+}
+
+.auth-form input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  outline: 0;
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  gap: 8px;
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -147,6 +204,12 @@ h1 {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
+}
+
+.trend-toolbar {
+  display: flex;
+  gap: 8px;
+  margin: -6px 0 16px;
 }
 
 .summary-grid {
@@ -240,6 +303,21 @@ h1 {
   background: var(--tab-active-bg);
   border-color: var(--tab-active-bg);
   color: var(--tab-active-text);
+}
+
+.period-button {
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.period-button.active {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .search {
@@ -482,6 +560,7 @@ h1 {
   }
 
   .tabs,
+  .trend-toolbar,
   .search,
   .run-button,
   .ghost-button,
@@ -494,6 +573,14 @@ h1 {
   }
 
   .tab {
+    flex: 1;
+  }
+
+  .trend-toolbar {
+    margin-top: -4px;
+  }
+
+  .period-button {
     flex: 1;
   }
 
@@ -525,6 +612,20 @@ h1 {
 
   h1 {
     font-size: 24px;
+  }
+
+  .auth-panel {
+    padding: 16px;
+  }
+
+  .auth-head,
+  .auth-tabs,
+  .code-row {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-head {
+    flex-direction: column;
   }
 
   .repo-row {

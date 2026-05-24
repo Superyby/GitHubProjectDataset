@@ -2,7 +2,39 @@ from datetime import date, datetime
 from typing import Any
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+
+class UserPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    username: str
+    email: EmailStr
+
+
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=64)
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+
+
+class PasswordLoginRequest(BaseModel):
+    account: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class SendEmailCodeRequest(BaseModel):
+    email: EmailStr
+
+
+class EmailCodeLoginRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6)
+
+
+class AuthResult(BaseModel):
+    token: str
+    user: UserPublic
 
 
 class RepoRankingItem(BaseModel):

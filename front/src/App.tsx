@@ -1,18 +1,29 @@
-import { BarChart3, Bot, Flame, Github, Languages, Moon, Rocket, Search, Star, Sun, TrendingUp } from "lucide-react";
+import { BarChart3, Bot, Flame, Github, Languages, LineChart, LogOut, Mail, Moon, Rocket, Search, Star, Sun, TrendingUp, UserPlus } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
   analyzeRepo,
+  AuthUser,
+  fetchMe,
   DailyJobStatus,
   DailySummary,
   fetchAllRepos,
   fetchRanking,
   fetchSummary,
+  fetchTrendRanking,
+  getStoredToken,
   ListKind,
+  loginWithEmailCode,
+  loginWithPassword,
+  logout,
+  register,
   RankingKind,
   RepoAiAnalysisResult,
   RepoRankingItem,
-  runScoreJob
+  runScoreJob,
+  sendEmailCode,
+  setStoredToken,
+  TrendDays
 } from "./api";
 
 type Locale = "zh" | "en";
@@ -35,6 +46,10 @@ const text = {
     hot: "\u70ed\u95e8",
     rising: "\u65b0\u661f",
     momentum: "\u52a0\u901f",
+    topn: "TopN",
+    days3: "3 \u5929",
+    days7: "7 \u5929",
+    days30: "30 \u5929",
     all: "\u5168\u90e8",
     search: "\u641c\u7d22\u9879\u76ee\u3001\u8bed\u8a00\u3001\u4e3b\u9898\u3001\u8d8b\u52bf",
     loading: "\u6b63\u5728\u52a0\u8f7d\u699c\u5355...",
@@ -54,6 +69,7 @@ const text = {
     trendPending: "\u8d8b\u52bf\u5f85\u5206\u6790",
     noDescription: "\u6682\u65e0\u63cf\u8ff0",
     delta7d: "7 \u65e5\u589e\u957f",
+    deltaTopN: "\u5468\u671f\u589e\u957f",
     scoreMetric: "\u8bc4\u5206",
     trend: "\u8d8b\u52bf",
     scoring: "\u6b63\u5728\u8ba1\u7b97\u589e\u957f\u8bc4\u5206...",
@@ -81,6 +97,10 @@ const text = {
     hot: "Hot",
     rising: "Rising",
     momentum: "Momentum",
+    topn: "TopN",
+    days3: "3d",
+    days7: "7d",
+    days30: "30d",
     all: "All",
     search: "Search repo, language, topic, trend",
     loading: "Loading rankings...",
@@ -100,6 +120,7 @@ const text = {
     trendPending: "trend pending",
     noDescription: "No description",
     delta7d: "7d Delta",
+    deltaTopN: "Period Delta",
     scoreMetric: "Score",
     trend: "Trend",
     scoring: "Calculating growth scores...",
@@ -120,14 +141,80 @@ export function App() {
     return saved === "dark" ? "dark" : "light";
   });
   const t = text[locale];
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    if (!getStoredToken()) {
+      setAuthChecked(true);
+      return;
+    }
+    fetchMe()
+      .then(setUser)
+      .catch(() => setUser(null))
+      .finally(() => setAuthChecked(true));
+  }, []);
+
+  useEffect(() => {
+    const handler = () => setUser(null);
+    window.addEventListener("auth:expired", handler);
+    return () => window.removeEventListener("auth:expired", handler);
+  }, []);
+
+  if (!authChecked) {
+    return <div className="auth-loading">GitHub Project Radar</div>;
+  }
+
+  if (!user) {
+    return (
+      <AuthScreen
+        locale={locale}
+        theme={theme}
+        setLocale={setLocale}
+        setTheme={setTheme}
+        onAuthed={setUser}
+      />
+    );
+  }
+
+  return (
+    <RadarApp
+      locale={locale}
+      theme={theme}
+      setLocale={setLocale}
+      setTheme={setTheme}
+      user={user}
+      onLogout={() => setUser(null)}
+    />
+  );
+}
+
+function RadarApp({
+  locale,
+  theme,
+  setLocale,
+  setTheme,
+  user,
+  onLogout
+}: {
+  locale: Locale;
+  theme: Theme;
+  setLocale: (locale: Locale) => void;
+  setTheme: (theme: Theme) => void;
+  user: AuthUser;
+  onLogout: () => void;
+}) {
+  const t = text[locale];
   const tabs: Array<{ kind: ListKind; label: string; icon: ReactNode }> = [
     { kind: "hot", label: t.hot, icon: <Flame size={16} /> },
     { kind: "rising", label: t.rising, icon: <Rocket size={16} /> },
     { kind: "momentum", label: t.momentum, icon: <TrendingUp size={16} /> },
+    { kind: "topn", label: t.topn, icon: <LineChart size={16} /> },
     { kind: "all", label: t.all, icon: <Github size={16} /> }
   ];
 
   const [activeKind, setActiveKind] = useState<ListKind>("hot");
+  const [trendDays, setTrendDays] = useState<TrendDays>(7);
   const [items, setItems] = useState<RepoRankingItem[]>([]);
   const [summary, setSummary] = useState<DailySummary | null>(null);
   const [query, setQuery] = useState("");
@@ -142,8 +229,18 @@ export function App() {
     window.localStorage.setItem("theme", theme);
   }, [theme]);
 
+  async function handleLogout() {
+    await logout();
+    onLogout();
+  }
+
   async function refreshData(kind = activeKind, searchQuery = query) {
-    const listPromise = kind === "all" ? fetchAllRepos(searchQuery) : fetchRanking(kind);
+    const listPromise =
+      kind === "all"
+        ? fetchAllRepos(searchQuery)
+        : kind === "topn"
+          ? fetchTrendRanking(trendDays)
+          : fetchRanking(kind);
     const [rankingData, summaryData] = await Promise.all([listPromise, fetchSummary()]);
     setItems(rankingData);
     setSummary(summaryData);
@@ -171,7 +268,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeKind]);
+  }, [activeKind, trendDays]);
 
   useEffect(() => {
     if (activeKind !== "all") {
@@ -267,6 +364,10 @@ export function App() {
             <BarChart3 size={16} />
             {t.score}
           </button>
+          <button className="ghost-button" onClick={handleLogout} title={user.email}>
+            <LogOut size={16} />
+            {user.username}
+          </button>
         </div>
       </header>
 
@@ -295,6 +396,24 @@ export function App() {
         </label>
       </section>
 
+      {activeKind === "topn" && (
+        <section className="trend-toolbar" aria-label="Trend period">
+          {[
+            { value: 3 as TrendDays, label: t.days3 },
+            { value: 7 as TrendDays, label: t.days7 },
+            { value: 30 as TrendDays, label: t.days30 }
+          ].map((option) => (
+            <button
+              key={option.value}
+              className={trendDays === option.value ? "period-button active" : "period-button"}
+              onClick={() => setTrendDays(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </section>
+      )}
+
       {notice && <div className="notice">{notice}</div>}
       {loading && <div className="notice">{t.loading}</div>}
 
@@ -307,6 +426,7 @@ export function App() {
             analysis={analysisByRepo[item.full_name]}
             analyzing={analyzingRepo === item.full_name}
             aiEnabled={summary?.ai_enabled ?? false}
+            deltaLabel={activeKind === "topn" ? t.deltaTopN : t.delta7d}
             onAnalyze={() => handleAnalyzeRepo(item.full_name)}
           />
         ))}
@@ -316,6 +436,152 @@ export function App() {
             <p>{t.noRanking}</p>
           </div>
         )}
+      </section>
+    </main>
+  );
+}
+
+function AuthScreen({
+  locale,
+  theme,
+  setLocale,
+  setTheme,
+  onAuthed
+}: {
+  locale: Locale;
+  theme: Theme;
+  setLocale: (locale: Locale) => void;
+  setTheme: (theme: Theme) => void;
+  onAuthed: (user: AuthUser) => void;
+}) {
+  const [mode, setMode] = useState<"password" | "email" | "register">("password");
+  const [username, setUsername] = useState("");
+  const [account, setAccount] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("theme", theme);
+  }, [theme]);
+
+  async function completeAuth(action: () => Promise<{ token: string; user: AuthUser }>) {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const result = await action();
+      setStoredToken(result.token);
+      onAuthed(result.user);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Authentication failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSendCode() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      await sendEmailCode(email);
+      setNotice(locale === "zh" ? "验证码已发送。" : "Code sent.");
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Failed to send code");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel">
+        <div className="auth-head">
+          <div>
+            <p className="eyebrow">GitHub Project Radar</p>
+            <h1>{locale === "zh" ? "登录开源项目雷达" : "Sign in to the radar"}</h1>
+          </div>
+          <div className="actions">
+            <button
+              className="ghost-button"
+              onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+            >
+              {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
+              {theme === "light" ? "Dark" : "Light"}
+            </button>
+            <button className="ghost-button" onClick={() => setLocale(locale === "zh" ? "en" : "zh")}>
+              <Languages size={16} />
+              {locale === "zh" ? "EN" : "\u4e2d\u6587"}
+            </button>
+          </div>
+        </div>
+
+        <div className="auth-tabs">
+          <button className={mode === "password" ? "tab active" : "tab"} onClick={() => setMode("password")}>
+            <Github size={16} />
+            {locale === "zh" ? "密码登录" : "Password"}
+          </button>
+          <button className={mode === "email" ? "tab active" : "tab"} onClick={() => setMode("email")}>
+            <Mail size={16} />
+            {locale === "zh" ? "邮箱验证码" : "Email code"}
+          </button>
+          <button className={mode === "register" ? "tab active" : "tab"} onClick={() => setMode("register")}>
+            <UserPlus size={16} />
+            {locale === "zh" ? "注册" : "Register"}
+          </button>
+        </div>
+
+        {mode === "password" && (
+          <form
+            className="auth-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              completeAuth(() => loginWithPassword(account, password));
+            }}
+          >
+            <input value={account} onChange={(event) => setAccount(event.target.value)} placeholder={locale === "zh" ? "用户名或邮箱" : "Username or email"} />
+            <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder={locale === "zh" ? "密码" : "Password"} type="password" />
+            <button className="run-button" disabled={busy}>{locale === "zh" ? "登录" : "Sign in"}</button>
+          </form>
+        )}
+
+        {mode === "email" && (
+          <form
+            className="auth-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              completeAuth(() => loginWithEmailCode(email, code));
+            }}
+          >
+            <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder={locale === "zh" ? "邮箱" : "Email"} type="email" />
+            <div className="code-row">
+              <input value={code} onChange={(event) => setCode(event.target.value)} placeholder={locale === "zh" ? "6 位验证码" : "6-digit code"} />
+              <button className="ghost-button" type="button" disabled={busy || !email} onClick={handleSendCode}>
+                {locale === "zh" ? "发送" : "Send"}
+              </button>
+            </div>
+            <button className="run-button" disabled={busy}>{locale === "zh" ? "验证码登录" : "Sign in"}</button>
+          </form>
+        )}
+
+        {mode === "register" && (
+          <form
+            className="auth-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              completeAuth(() => register(username, email, password));
+            }}
+          >
+            <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder={locale === "zh" ? "用户名" : "Username"} />
+            <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder={locale === "zh" ? "邮箱" : "Email"} type="email" />
+            <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder={locale === "zh" ? "至少 8 位密码" : "Password, 8+ chars"} type="password" />
+            <button className="run-button" disabled={busy}>{locale === "zh" ? "注册并登录" : "Register"}</button>
+          </form>
+        )}
+
+        {notice && <div className="notice">{notice}</div>}
       </section>
     </main>
   );
@@ -389,6 +655,7 @@ function RepoRow({
   analysis,
   analyzing,
   aiEnabled,
+  deltaLabel,
   onAnalyze
 }: {
   item: RepoRankingItem;
@@ -396,6 +663,7 @@ function RepoRow({
   analysis?: RepoAiAnalysisResult;
   analyzing: boolean;
   aiEnabled: boolean;
+  deltaLabel: string;
   onAnalyze: () => void;
 }) {
   const summary = analysis?.trend_summary_zh || item.trend_summary_zh || item.summary_zh;
@@ -436,7 +704,7 @@ function RepoRow({
       </div>
       <div className="metrics">
         <Metric label="Stars" value={formatNumber(item.stars)} />
-        <Metric label={t.delta7d} value={item.history_days > 0 ? `+${formatNumber(item.star_delta_7d)}` : "N/A"} highlight />
+        <Metric label={deltaLabel} value={item.history_days > 0 ? `+${formatNumber(item.star_delta_7d)}` : "N/A"} highlight />
         <Metric label={t.scoreMetric} value={Number(item.score || 0).toFixed(2)} />
         <div className="spark-cell" aria-label={t.trend}>
           <Sparkline points={item.trend_points} />

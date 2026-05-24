@@ -1,11 +1,11 @@
 # 部署说明
 
-这个项目是前后端分离：
+本项目暂不使用 Nginx，部署结构为：
 
-- 后端：FastAPI，默认监听 `8010`
-- 前端：Vite 构建后的静态文件，建议用 Nginx 托管
-
-你现在的 MySQL、Redis、GitHub Token、DeepSeek 配置可以保持不变。部署到服务器时，主要只需要改域名相关配置。
+- 后端：FastAPI + uvicorn，监听 `8010`
+- 前端：Vite 构建后用 `vite preview` 托管，默认监听 `15000`
+- 数据库：远程 PostgreSQL，`8.160.161.184:35672`
+- Redis：已移除
 
 ## 1. 服务器环境
 
@@ -13,122 +13,59 @@
 
 ```bash
 sudo apt update
-sudo apt install -y git curl nginx python3.11 python3.11-venv python3-pip
+sudo apt install -y git curl python3.11 python3.11-venv python3-pip
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt install -y nodejs
 ```
 
-检查版本：
-
-```bash
-python3.11 --version
-node -v
-npm -v
-nginx -v
-```
-
 ## 2. 上传代码
-
-如果代码在 Git 仓库：
 
 ```bash
 cd /opt
-sudo git clone <你的仓库地址> github-project-dataset
-sudo chown -R $USER:$USER /opt/github-project-dataset
+git clone <你的仓库地址> github-project-dataset
 cd /opt/github-project-dataset
-```
-
-如果不用 Git，也可以直接把整个项目目录上传到：
-
-```text
-/opt/github-project-dataset
 ```
 
 ## 3. 后端配置
 
-进入后端目录：
-
 ```bash
 cd /opt/github-project-dataset/backend
 cp .env.example .env
-```
-
-编辑 `.env`：
-
-```bash
 nano .env
 ```
 
-数据库、Redis、GitHub、DeepSeek 这些配置保持你现在的值即可：
+核心配置示例：
 
 ```env
-DATABASE_URL=你的当前数据库连接
-GITHUB_TOKEN=你的当前 GitHub Token
-REDIS_URL=你的当前 Redis 地址
-REDIS_PASSWORD=你的当前 Redis 密码
-DEEPSEEK_API_KEY=你的当前 DeepSeek Key
+DATABASE_URL=postgresql+psycopg://postgres:你的数据库密码@8.160.161.184:35672/github_project_dataset
+GITHUB_TOKEN=你的 GitHub Token
+GITHUB_DAILY_REPO_LIMIT=1000
+GITHUB_DAILY_REFRESH_LIMIT=500
+DEEPSEEK_API_KEY=你的 DeepSeek Key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=你的当前模型
-AI_ENABLED=false
-```
-
-`AI_ENABLED` 是 AI 分析总开关。
-
-前期部署不想启用 AI，就保持：
-
-```env
-AI_ENABLED=false
-```
-
-这样不会影响榜单、搜索、评分、趋势图等基础功能，只是页面里的单仓库 AI 分析按钮会显示为未启用。
-
-后期要启用 AI 时，改成：
-
-```env
+DEEPSEEK_MODEL=deepseek-chat
 AI_ENABLED=true
-```
-
-然后重启后端即可：
-
-```bash
-sudo systemctl restart github-radar-backend
-```
-
-需要改的是 `CORS_ORIGINS`。
-
-如果你有域名：
-
-```env
-CORS_ORIGINS=https://你的域名
-```
-
-如果暂时只用服务器 IP：
-
-```env
-CORS_ORIGINS=http://你的服务器IP
-```
-
-是否启用后端定时采集：
-
-```env
 SCHEDULER_ENABLED=true
+SCHEDULER_HOUR=3
+SCHEDULER_MINUTE=0
+CORS_ORIGINS=http://你的服务器IP:15000
 ```
 
-当前代码里定时任务是每天北京时间：
-
-- 08:00 采集一次
-- 20:00 采集一次
-
-如果你暂时不想自动采集，就保持：
+邮箱验证码登录需要 SMTP：
 
 ```env
-SCHEDULER_ENABLED=false
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=your_account
+SMTP_PASSWORD=your_password
+SMTP_FROM=your_account@example.com
+SMTP_USE_TLS=true
+SMTP_USE_SSL=false
 ```
 
 ## 4. 安装后端依赖并初始化数据库
 
 ```bash
-cd /opt/github-project-dataset/backend
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
@@ -136,29 +73,25 @@ pip install -e .
 python -m app.db.init_db
 ```
 
-测试后端能否启动：
+测试启动：
 
 ```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8010
+uvicorn app.main:app --host 0.0.0.0 --port 8010
 ```
 
-另开一个终端测试：
+健康检查：
 
 ```bash
 curl http://127.0.0.1:8010/api/health
 ```
 
-正常应该返回：
+正常返回：
 
 ```json
 {"status":"ok"}
 ```
 
-测试没问题后，按 `Ctrl+C` 停掉临时启动。
-
 ## 5. 用 systemd 托管后端
-
-创建服务文件：
 
 ```bash
 sudo tee /etc/systemd/system/github-radar-backend.service >/dev/null <<'EOF'
@@ -170,7 +103,7 @@ After=network.target
 Type=simple
 WorkingDirectory=/opt/github-project-dataset/backend
 Environment=PATH=/opt/github-project-dataset/backend/.venv/bin
-ExecStart=/opt/github-project-dataset/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8010
+ExecStart=/opt/github-project-dataset/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8010
 Restart=always
 RestartSec=5
 
@@ -179,178 +112,74 @@ WantedBy=multi-user.target
 EOF
 ```
 
-启动服务：
-
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now github-radar-backend
 sudo systemctl status github-radar-backend
 ```
 
-检查后端：
+## 6. 构建并托管前端
 
 ```bash
-curl http://127.0.0.1:8010/api/health
-```
-
-查看后端日志：
-
-```bash
-sudo journalctl -u github-radar-backend -f
-```
-
-## 6. 构建前端
-
-推荐前端和后端使用同一个域名，通过 Nginx 把 `/api` 转发给后端。
-
-这种方式下，前端的 API 地址留空即可：
-
-```bash
-cd /opt/github-project-dataset/frontend
+cd /opt/github-project-dataset/front
 cat > .env.production <<'EOF'
-VITE_API_BASE_URL=
+VITE_API_BASE_URL=http://你的服务器IP:8010
 EOF
 npm ci
 npm run build
 ```
 
-如果你的前端和后端不是同一个域名，比如：
-
-```text
-前端：https://你的域名
-后端：https://api.你的域名
-```
-
-那 `.env.production` 写：
-
-```env
-VITE_API_BASE_URL=https://api.你的域名
-```
-
-然后再执行：
+用 systemd 托管 Vite preview：
 
 ```bash
-npm ci
-npm run build
-```
+sudo tee /etc/systemd/system/github-radar-front.service >/dev/null <<'EOF'
+[Unit]
+Description=GitHub Radar Frontend
+After=network.target
 
-## 7. 配置 Nginx
+[Service]
+Type=simple
+WorkingDirectory=/opt/github-project-dataset/front
+ExecStart=/usr/bin/npm run preview -- --host 0.0.0.0 --port 15000
+Restart=always
+RestartSec=5
 
-推荐结构：
-
-```text
-https://你的域名
-  ├─ /       前端页面
-  └─ /api/   转发到后端 127.0.0.1:8010
-```
-
-创建 Nginx 配置：
-
-```bash
-sudo tee /etc/nginx/sites-available/github-radar >/dev/null <<'EOF'
-server {
-    listen 80;
-    server_name 你的域名;
-
-    root /opt/github-project-dataset/frontend/dist;
-    index index.html;
-
-    location /api/ {
-        proxy_pass http://127.0.0.1:8010/api/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
+[Install]
+WantedBy=multi-user.target
 EOF
 ```
 
-如果你暂时没有域名，只用服务器 IP，把这一行：
-
-```nginx
-server_name 你的域名;
-```
-
-改成：
-
-```nginx
-server_name _;
-```
-
-启用 Nginx 配置：
-
 ```bash
-sudo ln -s /etc/nginx/sites-available/github-radar /etc/nginx/sites-enabled/github-radar
-sudo nginx -t
-sudo systemctl reload nginx
+sudo systemctl daemon-reload
+sudo systemctl enable --now github-radar-front
+sudo systemctl status github-radar-front
 ```
 
-现在访问：
+访问：
 
 ```text
-http://你的域名
+http://你的服务器IP:15000
 ```
 
-或者：
+## 7. 定时采集
 
-```text
-http://你的服务器IP
-```
-
-## 8. 配置 HTTPS
-
-如果你有域名，建议配置 HTTPS：
-
-```bash
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d 你的域名
-```
-
-HTTPS 配好后，把后端 `.env` 的 `CORS_ORIGINS` 改成：
+`SCHEDULER_ENABLED=true` 后，后端会每天北京时间 `03:00` 采集一次。也可以通过下面两个配置调整：
 
 ```env
-CORS_ORIGINS=https://你的域名
+SCHEDULER_HOUR=3
+SCHEDULER_MINUTE=0
 ```
 
-然后重启后端：
+服务器部署在新加坡也没关系，代码显式使用 `Asia/Shanghai` 时区。
 
-```bash
-sudo systemctl restart github-radar-backend
-```
+稳定性策略：
 
-## 9. 常用维护命令
-
-查看后端状态：
-
-```bash
-sudo systemctl status github-radar-backend
-```
-
-查看后端日志：
-
-```bash
-sudo journalctl -u github-radar-backend -f
-```
-
-重启后端：
-
-```bash
-sudo systemctl restart github-radar-backend
-```
-
-重新构建前端：
-
-```bash
-cd /opt/github-project-dataset/frontend
-npm ci
-npm run build
-sudo systemctl reload nginx
-```
+- APScheduler 设置 `max_instances=1` 和 `coalesce=true`，避免同一进程内定时任务堆积。
+- `run_daily` 内部有互斥锁，手动触发和定时触发撞车时只跑一个。
+- PostgreSQL advisory lock 会阻止多进程/多实例同时跑同一轮采集。
+- 每次采集写入 `github_collection_run`，可追踪成功/失败和数量。
+- 单个 GitHub 查询或单个仓库失败会计入失败数并继续处理后续数据。
+- 仓库主表、每日快照、每日评分均按唯一约束 upsert，重复执行不会重复插入仓库。
 
 手动执行一次每日采集：
 
@@ -360,28 +189,27 @@ source .venv/bin/activate
 python -m app.jobs.run_daily
 ```
 
-手动检查后端健康状态：
+## 8. 常用维护命令
 
 ```bash
-curl http://127.0.0.1:8010/api/health
+sudo systemctl status github-radar-backend
+sudo journalctl -u github-radar-backend -f
+sudo systemctl restart github-radar-backend
 ```
 
-## 10. 部署前注意事项
+```bash
+sudo systemctl status github-radar-front
+sudo journalctl -u github-radar-front -f
+sudo systemctl restart github-radar-front
+```
 
-不要把 `.env` 提交到公开仓库。
+## 9. 安全注意事项
 
-你的 `.env` 里有：
+不要提交 `.env`。其中包含：
 
-- 数据库密码
-- Redis 密码
+- PostgreSQL 密码
 - GitHub Token
 - DeepSeek API Key
+- SMTP 密码
 
-如果这些信息已经传到公开仓库，建议立即重新生成 GitHub Token 和 DeepSeek Key。
-
-生产环境推荐：
-
-- 后端只监听 `127.0.0.1:8010`
-- 不直接暴露后端端口到公网
-- 只开放 Nginx 的 `80` 和 `443`
-- 前端和后端同域部署，避免 CORS 问题
+如果暂不使用 Nginx，请在服务器防火墙或云安全组中只开放需要访问的端口，例如 `15000` 和 `8010`。

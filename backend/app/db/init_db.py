@@ -1,6 +1,6 @@
 from app import models  # noqa: F401
 from app.db.session import Base, engine
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 
 def main() -> None:
@@ -27,21 +27,15 @@ def ensure_columns() -> None:
             "ALTER TABLE github_repo_ai_analysis ADD COLUMN trend_label VARCHAR(64) NULL",
         ),
     ]
+    inspector = inspect(engine)
+    existing_columns = {
+        table: {column["name"] for column in inspector.get_columns(table)}
+        for table, _, _ in migrations
+        if inspector.has_table(table)
+    }
     with engine.begin() as conn:
         for table, column, ddl in migrations:
-            exists = conn.scalar(
-                text(
-                    """
-                    SELECT COUNT(*)
-                    FROM information_schema.columns
-                    WHERE table_schema = DATABASE()
-                      AND table_name = :table
-                      AND column_name = :column
-                    """
-                ),
-                {"table": table, "column": column},
-            )
-            if not exists:
+            if column not in existing_columns.get(table, set()):
                 conn.execute(text(ddl))
 
 

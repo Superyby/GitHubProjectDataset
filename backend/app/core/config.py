@@ -22,9 +22,7 @@ class Settings(BaseSettings):
     github_per_page: int = Field(default=50, ge=1, le=100)
     github_max_pages_per_query: int = Field(default=2, ge=1, le=10)
     github_daily_repo_limit: int = Field(default=1000, ge=1, le=10000)
-
-    redis_url: str = "redis://127.0.0.1:6379/0"
-    redis_enabled: bool = False
+    github_daily_refresh_limit: int = Field(default=500, ge=1, le=10000)
 
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
@@ -32,6 +30,18 @@ class Settings(BaseSettings):
     ai_enabled: bool = False
 
     scheduler_enabled: bool = False
+    scheduler_hour: int = Field(default=3, ge=0, le=23)
+    scheduler_minute: int = Field(default=0, ge=0, le=59)
+
+    auth_token_expire_hours: int = Field(default=168, ge=1, le=24 * 30)
+    email_code_expire_minutes: int = Field(default=10, ge=1, le=60)
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
 
     @field_validator("database_url", mode="before")
     @classmethod

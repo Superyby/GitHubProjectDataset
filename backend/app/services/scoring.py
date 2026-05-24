@@ -3,8 +3,8 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import case, select, update
-from sqlalchemy.dialects.mysql import insert as mysql_insert
+from sqlalchemy import case, func, select, update
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.orm import Session, aliased
 
 from app.models.repo import GithubRepo
@@ -19,43 +19,47 @@ def _decimal(value: float) -> Decimal:
 class ScoreService:
     def calculate_daily_scores(self, db: Session, score_date: date | None = None) -> dict[str, int]:
         current_date = score_date or date.today()
-        current_rows = db.execute(
-            select(
-                GithubRepoDailySnapshot.repo_id,
-                GithubRepoDailySnapshot.stars,
-                GithubRepo.first_seen_at,
-                GithubRepo.created_at,
-                GithubRepo.pushed_at,
-            )
-            .join(GithubRepo, GithubRepo.id == GithubRepoDailySnapshot.repo_id)
-            .where(GithubRepoDailySnapshot.snapshot_date == current_date)
-        ).all()
+        try:
+            current_rows = db.execute(
+                select(
+                    GithubRepoDailySnapshot.repo_id,
+                    GithubRepoDailySnapshot.stars,
+                    GithubRepo.first_seen_at,
+                    GithubRepo.created_at,
+                    GithubRepo.pushed_at,
+                )
+                .join(GithubRepo, GithubRepo.id == GithubRepoDailySnapshot.repo_id)
+                .where(GithubRepoDailySnapshot.snapshot_date == current_date)
+            ).all()
 
-        repo_ids = [row.repo_id for row in current_rows]
-        stars_1d = self._previous_stars_map(db, repo_ids, current_date, 1)
-        stars_7d = self._previous_stars_map(db, repo_ids, current_date, 7)
-        stars_30d = self._previous_stars_map(db, repo_ids, current_date, 30)
+            repo_ids = [row.repo_id for row in current_rows]
+            stars_1d = self._previous_stars_map(db, repo_ids, current_date, 1)
+            stars_7d = self._previous_stars_map(db, repo_ids, current_date, 7)
+            stars_30d = self._previous_stars_map(db, repo_ids, current_date, 30)
 
-        payloads = [
-            self._build_score_payload(
-                repo_id=row.repo_id,
-                stars=row.stars,
-                previous_1d=stars_1d.get(row.repo_id),
-                previous_7d=stars_7d.get(row.repo_id),
-                previous_30d=stars_30d.get(row.repo_id),
-                first_seen_at=row.first_seen_at,
-                created_at=row.created_at,
-                pushed_at=row.pushed_at,
-                current_date=current_date,
-            )
-            for row in current_rows
-        ]
+            payloads = [
+                self._build_score_payload(
+                    repo_id=row.repo_id,
+                    stars=row.stars,
+                    previous_1d=stars_1d.get(row.repo_id),
+                    previous_7d=stars_7d.get(row.repo_id),
+                    previous_30d=stars_30d.get(row.repo_id),
+                    first_seen_at=row.first_seen_at,
+                    created_at=row.created_at,
+                    pushed_at=row.pushed_at,
+                    current_date=current_date,
+                )
+                for row in current_rows
+            ]
 
-        for chunk in self._chunks(payloads, 200):
-            self._upsert_scores(db, chunk)
+            for chunk in self._chunks(payloads, 200):
+                self._upsert_scores(db, chunk)
 
-        self._assign_ranks(db, current_date)
-        return {"scored": len(payloads)}
+            self._assign_ranks(db, current_date)
+            return {"scored": len(payloads)}
+        except Exception:
+            db.rollback()
+            raise
 
     def _previous_stars_map(
         self, db: Session, repo_ids: list[int], current_date: date, days: int
@@ -67,17 +71,13 @@ class ScoreService:
         latest = (
             select(
                 GithubRepoDailySnapshot.repo_id,
-                GithubRepoDailySnapshot.snapshot_date,
+                func.max(GithubRepoDailySnapshot.snapshot_date).label("snapshot_date"),
             )
             .where(
                 GithubRepoDailySnapshot.repo_id.in_(repo_ids),
                 GithubRepoDailySnapshot.snapshot_date <= cutoff,
             )
-            .distinct(GithubRepoDailySnapshot.repo_id)
-            .order_by(
-                GithubRepoDailySnapshot.repo_id,
-                GithubRepoDailySnapshot.snapshot_date.desc(),
-            )
+            .group_by(GithubRepoDailySnapshot.repo_id)
             .subquery()
         )
         snap = aliased(GithubRepoDailySnapshot)
@@ -153,13 +153,18 @@ class ScoreService:
     def _upsert_scores(self, db: Session, payloads: list[dict[str, Any]]) -> None:
         if not payloads:
             return
-        insert_stmt = mysql_insert(GithubRepoDailyScore).values(payloads)
+        insert_stmt = postgres_insert(GithubRepoDailyScore).values(payloads)
         update_payload = {
-            key: insert_stmt.inserted[key]
+            key: insert_stmt.excluded[key]
             for key in payloads[0]
             if key not in {"repo_id", "score_date"}
         }
-        db.execute(insert_stmt.on_duplicate_key_update(**update_payload))
+        db.execute(
+            insert_stmt.on_conflict_do_update(
+                index_elements=["repo_id", "score_date"],
+                set_=update_payload,
+            )
+        )
         db.commit()
 
     def _activity_score(self, pushed_at: datetime | None, current_date: date) -> float:

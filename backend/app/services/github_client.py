@@ -47,15 +47,15 @@ class GitHubClient:
         self.client.close()
 
 
-def build_default_queries(today: date) -> list[tuple[str, str]]:
+def build_default_queries(today: date) -> list[tuple[str, str, str]]:
     week_ago = today - timedelta(days=7)
     month_ago = today - timedelta(days=30)
     quarter_ago = today - timedelta(days=90)
 
     base_queries = [
-        (f"stars:>100 pushed:>={week_ago.isoformat()} fork:false archived:false", "stars"),
-        (f"created:>={month_ago.isoformat()} stars:>20 fork:false archived:false", "stars"),
-        (f"created:>={quarter_ago.isoformat()} stars:>50 fork:false archived:false", "stars"),
+        ("hot_recent_push", f"stars:>100 pushed:>={week_ago.isoformat()} fork:false archived:false", "stars"),
+        ("new_30d", f"created:>={month_ago.isoformat()} stars:>20 fork:false archived:false", "stars"),
+        ("new_90d", f"created:>={quarter_ago.isoformat()} stars:>50 fork:false archived:false", "stars"),
     ]
 
     topic_queries = []
@@ -76,13 +76,18 @@ def build_default_queries(today: date) -> list[tuple[str, str]]:
     ]
     for topic in topics:
         topic_queries.append(
-            (f"topic:{topic} stars:>30 pushed:>={month_ago.isoformat()} fork:false archived:false", "stars")
+            (
+                f"topic:{topic}",
+                f"topic:{topic} stars:>30 pushed:>={month_ago.isoformat()} fork:false archived:false",
+                "stars",
+            )
         )
 
     language_queries = []
     for language in ["Python", "TypeScript", "Go", "Rust", "Java", "C++"]:
         language_queries.append(
             (
+                f"language:{language}",
                 f"language:{language} stars:>100 pushed:>={month_ago.isoformat()} fork:false archived:false",
                 "stars",
             )

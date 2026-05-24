@@ -4,7 +4,7 @@ from decimal import Decimal
 
 import httpx
 from sqlalchemy import select
-from sqlalchemy.dialects.mysql import insert as mysql_insert
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -146,14 +146,19 @@ class AiAnalyzer:
             "quality_score": Decimal(str(result.get("quality_score", 0))),
             "analyzed_at": datetime.now(timezone.utc).replace(tzinfo=None),
         }
-        insert_stmt = mysql_insert(RepoAiAnalysis).values(**payload)
+        insert_stmt = postgres_insert(RepoAiAnalysis).values(**payload)
         update_payload = {
-            key: insert_stmt.inserted[key] for key in payload if key not in {"repo_id", "model"}
+            key: insert_stmt.excluded[key] for key in payload if key not in {"repo_id", "model"}
         }
         last_error: OperationalError | None = None
         for _ in range(3):
             try:
-                db.execute(insert_stmt.on_duplicate_key_update(**update_payload))
+                db.execute(
+                    insert_stmt.on_conflict_do_update(
+                        index_elements=["repo_id", "model"],
+                        set_=update_payload,
+                    )
+                )
                 db.commit()
                 return
             except OperationalError as exc:

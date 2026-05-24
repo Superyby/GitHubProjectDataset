@@ -34,6 +34,7 @@ front/dist/
 front/build/
 front/.vite/
 front/.cache/
+front/.npm-cache/
 *.tsbuildinfo
 
 # Logs
@@ -62,4 +63,3 @@ Desktop.ini
 .vscode/
 *.swp
 *.swo
-

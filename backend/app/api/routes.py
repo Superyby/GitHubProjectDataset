@@ -2,25 +2,39 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from sqlalchemy import Select, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.analysis import RepoAiAnalysis
+from app.models.auth import User
 from app.models.repo import GithubRepo
 from app.models.score import GithubRepoDailyScore
 from app.models.snapshot import GithubRepoDailySnapshot
-from app.schemas.repo import JobResult, RepoAiAnalysisResult, RepoDetail, RepoRankingItem
+from app.schemas.repo import (
+    AuthResult,
+    EmailCodeLoginRequest,
+    JobResult,
+    PasswordLoginRequest,
+    RegisterRequest,
+    RepoAiAnalysisResult,
+    RepoDetail,
+    RepoRankingItem,
+    SendEmailCodeRequest,
+    UserPublic,
+)
 from app.services.ai_analyzer import AiAnalyzer
-from app.services.collector import GithubCollector
+from app.services.auth import AuthService, get_current_user
+from app.services.collection_log import (
+    latest_collection_run,
+    serialize_collection_run,
+)
 from app.services.job_status import (
     get_daily_job_status,
     mark_daily_job_failed,
-    mark_daily_job_finished,
     mark_daily_job_skipped,
-    mark_daily_job_started,
 )
 from app.services.scoring import ScoreService
 
@@ -32,6 +46,170 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@router.post("/auth/register", response_model=AuthResult)
+def register(
+    payload: RegisterRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> AuthResult:
+    service = AuthService(settings)
+    user = service.register_user(db, payload.username, str(payload.email), payload.password)
+    token = service.create_token(db, user)
+    return AuthResult(token=token, user=UserPublic.model_validate(user))
+
+
+@router.post("/auth/login", response_model=AuthResult)
+def login_with_password(
+    payload: PasswordLoginRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> AuthResult:
+    user, token = AuthService(settings).login_with_password(db, payload.account, payload.password)
+    return AuthResult(token=token, user=UserPublic.model_validate(user))
+
+
+@router.post("/auth/email-code")
+def send_email_code(
+    payload: SendEmailCodeRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, str]:
+    AuthService(settings).send_email_code(db, str(payload.email))
+    return {"status": "sent"}
+
+
+@router.post("/auth/email-login", response_model=AuthResult)
+def login_with_email_code(
+    payload: EmailCodeLoginRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> AuthResult:
+    user, token = AuthService(settings).login_with_email_code(db, str(payload.email), payload.code)
+    return AuthResult(token=token, user=UserPublic.model_validate(user))
+
+
+@router.post("/auth/logout")
+def logout(
+    authorization: str | None = Header(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, str]:
+    del current_user
+    if authorization and authorization.lower().startswith("bearer "):
+        AuthService(settings).revoke_token(db, authorization.split(" ", 1)[1].strip())
+    return {"status": "ok"}
+
+
+@router.get("/auth/me", response_model=UserPublic)
+def me(current_user: User = Depends(get_current_user)) -> UserPublic:
+    return UserPublic.model_validate(current_user)
+
+
+@router.get("/rankings/trends", response_model=list[RepoRankingItem])
+def trend_rankings(
+    days: int = Query(default=7),
+    ranking_date: date | None = Query(default=None, alias="date"),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[RepoRankingItem]:
+    del current_user
+    current_date = ranking_date or _latest_snapshot_date(db) or date.today()
+    if days not in {3, 7, 30}:
+        raise HTTPException(status_code=400, detail="days must be one of: 3, 7, 30")
+    start_date = current_date - timedelta(days=days)
+    current_snapshot = aliased(GithubRepoDailySnapshot)
+    previous_snapshot = aliased(GithubRepoDailySnapshot)
+    latest_previous = (
+        select(
+            GithubRepoDailySnapshot.repo_id,
+            func.max(GithubRepoDailySnapshot.snapshot_date).label("snapshot_date"),
+        )
+        .where(GithubRepoDailySnapshot.snapshot_date <= start_date)
+        .group_by(GithubRepoDailySnapshot.repo_id)
+        .subquery()
+    )
+    earliest_snapshot = (
+        select(
+            GithubRepoDailySnapshot.repo_id,
+            func.min(GithubRepoDailySnapshot.snapshot_date).label("snapshot_date"),
+        )
+        .where(GithubRepoDailySnapshot.snapshot_date < current_date)
+        .group_by(GithubRepoDailySnapshot.repo_id)
+        .subquery()
+    )
+    baseline = (
+        select(
+            current_snapshot.repo_id.label("repo_id"),
+            func.coalesce(
+                latest_previous.c.snapshot_date,
+                earliest_snapshot.c.snapshot_date,
+            ).label("snapshot_date"),
+        )
+        .outerjoin(latest_previous, latest_previous.c.repo_id == current_snapshot.repo_id)
+        .outerjoin(earliest_snapshot, earliest_snapshot.c.repo_id == current_snapshot.repo_id)
+        .where(current_snapshot.snapshot_date == current_date)
+        .subquery()
+    )
+    delta = current_snapshot.stars - previous_snapshot.stars
+    stmt: Select = (
+        select(
+            GithubRepo,
+            current_snapshot,
+            GithubRepoDailyScore,
+            RepoAiAnalysis,
+            delta.label("trend_delta"),
+        )
+        .join(current_snapshot, current_snapshot.repo_id == GithubRepo.id)
+        .join(baseline, baseline.c.repo_id == GithubRepo.id)
+        .join(
+            previous_snapshot,
+            (previous_snapshot.repo_id == GithubRepo.id)
+            & (previous_snapshot.snapshot_date == baseline.c.snapshot_date),
+        )
+        .outerjoin(
+            GithubRepoDailyScore,
+            (GithubRepoDailyScore.repo_id == GithubRepo.id)
+            & (GithubRepoDailyScore.score_date == current_date),
+        )
+        .outerjoin(RepoAiAnalysis, RepoAiAnalysis.repo_id == GithubRepo.id)
+        .where(current_snapshot.snapshot_date == current_date)
+        .order_by(delta.desc(), current_snapshot.stars.desc())
+        .limit(limit)
+    )
+    rows = db.execute(stmt).all()
+    trend_map = _trend_points_map(db, [repo.id for repo, *_ in rows], current_date, days + 1)
+    items = []
+    for rank, (repo, snapshot, score, analysis, trend_delta) in enumerate(rows, start=1):
+        items.append(
+            RepoRankingItem(
+                full_name=repo.full_name,
+                html_url=repo.html_url,
+                description=repo.description,
+                language=repo.language,
+                topics=repo.topics,
+                created_at=repo.created_at,
+                pushed_at=repo.pushed_at,
+                stars=snapshot.stars,
+                forks=snapshot.forks,
+                star_delta_1d=score.star_delta_1d if score else 0,
+                star_delta_7d=int(trend_delta or 0),
+                star_delta_30d=score.star_delta_30d if score else 0,
+                history_days=score.history_days if score else 0,
+                growth_rate_7d=score.growth_rate_7d if score else None,
+                score=Decimal(trend_delta or 0),
+                rank=rank,
+                category=analysis.category if analysis else None,
+                summary_zh=analysis.summary_zh if analysis else None,
+                trend_summary_zh=analysis.trend_summary_zh if analysis else None,
+                trend_label=analysis.trend_label if analysis else None,
+                trend_points=trend_map.get(repo.id, []),
+            )
+        )
+    return items
+
+
 @router.get("/rankings/{kind}", response_model=list[RepoRankingItem])
 def rankings(
     kind: Literal["hot", "rising", "momentum"],
@@ -39,7 +217,9 @@ def rankings(
     category: str | None = None,
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> list[RepoRankingItem]:
+    del current_user
     current_date = ranking_date or date.today()
     score_attr = {
         "hot": GithubRepoDailyScore.hot_score,
@@ -104,7 +284,9 @@ def all_repos(
     offset: int = Query(default=0, ge=0),
     q: str | None = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> list[RepoRankingItem]:
+    del current_user
     current_date = list_date or date.today()
     stmt: Select = (
         select(GithubRepo, GithubRepoDailySnapshot, GithubRepoDailyScore, RepoAiAnalysis)
@@ -181,11 +363,17 @@ def _trend_points_map(
     return result
 
 
+def _latest_snapshot_date(db: Session) -> date | None:
+    return db.scalar(select(func.max(GithubRepoDailySnapshot.snapshot_date)))
+
+
 @router.get("/summary")
 def daily_summary(
     summary_date: date | None = Query(default=None, alias="date"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
+    del current_user
     current_date = summary_date or date.today()
 
     snapshot_count = db.scalar(
@@ -243,11 +431,18 @@ def daily_summary(
         "languages": [{"name": name, "count": count} for name, count in language_rows],
         "categories": [{"name": name, "count": count} for name, count in category_rows],
         "job": get_daily_job_status(),
+        "latest_collection": serialize_collection_run(latest_collection_run(db)),
     }
 
 
 @router.get("/repos/{owner}/{name}", response_model=RepoDetail)
-def repo_detail(owner: str, name: str, db: Session = Depends(get_db)) -> RepoDetail:
+def repo_detail(
+    owner: str,
+    name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RepoDetail:
+    del current_user
     full_name = f"{owner}/{name}"
     repo = db.scalar(select(GithubRepo).where(GithubRepo.full_name == full_name))
     if repo is None:
@@ -262,7 +457,9 @@ def analyze_repo(
     analysis_date: date | None = Query(default=None, alias="date"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
+    del current_user
     if not settings.ai_enabled:
         raise HTTPException(status_code=403, detail="AI analysis is disabled")
     if not settings.deepseek_api_key:
@@ -281,7 +478,9 @@ def run_daily_job(
     force: bool = False,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    current_user: User = Depends(get_current_user),
 ) -> JobResult:
+    del current_user
     current_date = snapshot_date or date.today()
     snapshot_state = _snapshot_state(db, current_date)
     if not force and snapshot_state != "missing":
@@ -291,10 +490,8 @@ def run_daily_job(
             scoring={"skipped": 1, "reason": "collection_skipped"},
             analysis={"skipped": 1, "reason": "collection_skipped"},
         )
-    collection = GithubCollector(settings).collect_daily(db, current_date)
-    scoring = ScoreService().calculate_daily_scores(db, current_date)
-    analysis = {"skipped": 1, "reason": "manual_repo_ai_only"}
-    return JobResult(snapshot_date=current_date, collection=collection, scoring=scoring, analysis=analysis)
+    result = run_daily(current_date)
+    return JobResult(snapshot_date=current_date, **result)
 
 
 @router.post("/jobs/daily/async")
@@ -303,7 +500,9 @@ def run_daily_job_async(
     snapshot_date: date | None = None,
     force: bool = False,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, str]:
+    del current_user
     current_status = get_daily_job_status()
     if current_status.get("status") == "running":
         return {
@@ -322,13 +521,13 @@ def run_daily_job_async(
         mark_daily_job_skipped(current_date, snapshot_state, result)
         return {"status": "skipped", "snapshot_date": current_date.isoformat()}
 
-    mark_daily_job_started(current_date)
     background_tasks.add_task(_run_daily_background, current_date)
     return {"status": "started", "snapshot_date": current_date.isoformat()}
 
 
 @router.get("/jobs/daily/status")
-def daily_job_status() -> dict:
+def daily_job_status(current_user: User = Depends(get_current_user)) -> dict:
+    del current_user
     return get_daily_job_status()
 
 
@@ -336,7 +535,9 @@ def daily_job_status() -> dict:
 def run_score_job(
     score_date: date | None = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
+    del current_user
     current_date = score_date or date.today()
     return ScoreService().calculate_daily_scores(db, current_date)
 
@@ -345,11 +546,10 @@ def _run_daily_background(snapshot_date: date) -> None:
     from app.jobs.daily import run_daily
 
     try:
-        result = run_daily(snapshot_date)
+        run_daily(snapshot_date)
     except Exception as exc:
         mark_daily_job_failed(exc)
         raise
-    mark_daily_job_finished(result)
 
 
 def _snapshot_state(db: Session, snapshot_date: date) -> str:

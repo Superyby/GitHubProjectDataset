@@ -14,8 +14,16 @@ def create_inner_app() -> FastAPI:
 
     if settings.scheduler_enabled:
         scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
-        scheduler.add_job(run_daily, "cron", hour=8, minute=0, id="daily_github_radar_morning")
-        scheduler.add_job(run_daily, "cron", hour=20, minute=0, id="daily_github_radar_evening")
+        scheduler.add_job(
+            run_daily,
+            "cron",
+            hour=settings.scheduler_hour,
+            minute=settings.scheduler_minute,
+            id="daily_github_radar",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=60 * 30,
+        )
         scheduler.start()
 
         @app.on_event("shutdown")
