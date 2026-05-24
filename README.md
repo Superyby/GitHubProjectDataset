@@ -38,7 +38,7 @@ cp .env.example .env
 编辑 `backend/.env`，至少配置：
 
 ```env
-DATABASE_URL=postgresql+psycopg://postgres:你的数据库密码@8.160.161.184:35672/github_project_dataset
+DATABASE_URL=postgresql+psycopg://postgres:/github_project_dataset
 GITHUB_TOKEN=你的 GitHub Token
 GITHUB_DAILY_REPO_LIMIT=1000
 GITHUB_DAILY_REFRESH_LIMIT=500
@@ -47,7 +47,7 @@ AI_ENABLED=true
 SCHEDULER_ENABLED=true
 SCHEDULER_HOUR=3
 SCHEDULER_MINUTE=0
-CORS_ORIGINS=http://localhost:5173,http://8.222.230.5:15000
+CORS_ORIGINS=
 ```
 
 邮箱验证码登录需要配置 SMTP：
