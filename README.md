@@ -41,7 +41,6 @@ cp .env.example .env
 DATABASE_URL=postgresql+psycopg://postgres:/github_project_dataset
 GITHUB_TOKEN=你的 GitHub Token
 GITHUB_DAILY_REPO_LIMIT=1000
-GITHUB_DAILY_REFRESH_LIMIT=500
 DEEPSEEK_API_KEY=你的 DeepSeek Key
 AI_ENABLED=true
 SCHEDULER_ENABLED=true

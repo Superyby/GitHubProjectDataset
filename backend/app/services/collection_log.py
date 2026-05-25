@@ -31,6 +31,7 @@ def finish_collection_run(
     run.created = int(collection.get("created") or 0)
     run.updated = int(collection.get("updated") or 0)
     run.failed = int(collection.get("failed") or 0)
+    run.error = collection.get("error")
     db.commit()
 
 
@@ -45,6 +46,26 @@ def fail_collection_run(db: Session, run: GithubCollectionRun, error: BaseExcept
 def latest_collection_run(db: Session) -> GithubCollectionRun | None:
     return db.scalar(
         select(GithubCollectionRun).order_by(GithubCollectionRun.started_at.desc()).limit(1)
+    )
+
+
+def latest_successful_collection_run(db: Session) -> list[GithubCollectionRun]:
+    return list(
+        db.scalars(
+            select(GithubCollectionRun)
+            .where(GithubCollectionRun.status == "success")
+            .order_by(GithubCollectionRun.run_date.desc(), GithubCollectionRun.started_at.desc())
+            .limit(30)
+        )
+    )
+
+
+def latest_collection_run_for_date(db: Session, run_date: date) -> GithubCollectionRun | None:
+    return db.scalar(
+        select(GithubCollectionRun)
+        .where(GithubCollectionRun.run_date == run_date)
+        .order_by(GithubCollectionRun.started_at.desc())
+        .limit(1)
     )
 
 

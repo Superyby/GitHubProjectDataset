@@ -1,6 +1,7 @@
 from datetime import date
 from threading import Lock
 
+from app.core.dates import shanghai_today
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.services.collection_log import fail_collection_run, finish_collection_run, start_collection_run
@@ -20,13 +21,13 @@ _daily_run_lock = Lock()
 
 def run_daily(snapshot_date: date | None = None) -> dict[str, dict[str, int]]:
     if not _daily_run_lock.acquire(blocking=False):
-        current_date = snapshot_date or date.today()
+        current_date = snapshot_date or shanghai_today()
         result = {"skipped": 1, "reason": "daily_job_already_running"}
         mark_daily_job_skipped(current_date, "daily_job_already_running", result)
         return {"collection": result, "scoring": {"skipped": 1}, "analysis": {"skipped": 1}}
 
     settings = get_settings()
-    current_date = snapshot_date or date.today()
+    current_date = snapshot_date or shanghai_today()
     try:
         mark_daily_job_started(current_date)
         with SessionLocal() as db:
@@ -38,7 +39,10 @@ def run_daily(snapshot_date: date | None = None) -> dict[str, dict[str, int]]:
             try:
                 mark_daily_job_stage("collecting")
                 collection = GithubCollector(settings).collect_daily(db, current_date)
-                finish_collection_run(db, run, collection)
+                collection_status = "success"
+                if collection.get("successful_queries") == 0 and collection.get("failed_queries", 0) > 0:
+                    collection_status = "partial"
+                finish_collection_run(db, run, collection, status=collection_status)
                 mark_daily_job_stage("scoring")
                 scoring = ScoreService().calculate_daily_scores(db, current_date)
                 mark_daily_job_stage("done")

@@ -7,6 +7,7 @@ from sqlalchemy import case, func, select, update
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.orm import Session, aliased
 
+from app.core.dates import shanghai_today
 from app.models.repo import GithubRepo
 from app.models.score import GithubRepoDailyScore
 from app.models.snapshot import GithubRepoDailySnapshot
@@ -18,7 +19,7 @@ def _decimal(value: float) -> Decimal:
 
 class ScoreService:
     def calculate_daily_scores(self, db: Session, score_date: date | None = None) -> dict[str, int]:
-        current_date = score_date or date.today()
+        current_date = score_date or shanghai_today()
         try:
             current_rows = db.execute(
                 select(

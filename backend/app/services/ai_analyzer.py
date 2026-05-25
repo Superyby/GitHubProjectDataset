@@ -9,6 +9,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.dates import shanghai_today
 from app.models.analysis import RepoAiAnalysis
 from app.models.repo import GithubRepo
 from app.models.score import GithubRepoDailyScore
@@ -25,7 +26,7 @@ class AiAnalyzer:
         if not self.settings.ai_enabled or not self.settings.deepseek_api_key:
             return {"skipped": 1, "reason": "ai_disabled"}
 
-        current_date = analysis_date or date.today()
+        current_date = analysis_date or shanghai_today()
         repo = db.scalar(select(GithubRepo).where(GithubRepo.full_name == full_name))
         if repo is None:
             raise LookupError("Repository not found")

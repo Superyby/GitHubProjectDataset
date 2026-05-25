@@ -7,6 +7,7 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session, aliased
 
 from app.core.config import Settings, get_settings
+from app.core.dates import shanghai_today
 from app.db.session import get_db
 from app.models.analysis import RepoAiAnalysis
 from app.models.auth import User
@@ -28,7 +29,9 @@ from app.schemas.repo import (
 from app.services.ai_analyzer import AiAnalyzer
 from app.services.auth import AuthService, get_current_user
 from app.services.collection_log import (
+    latest_collection_run_for_date,
     latest_collection_run,
+    latest_successful_collection_run,
     serialize_collection_run,
 )
 from app.services.job_status import (
@@ -115,7 +118,7 @@ def trend_rankings(
     current_user: User = Depends(get_current_user),
 ) -> list[RepoRankingItem]:
     del current_user
-    current_date = ranking_date or _latest_snapshot_date(db) or date.today()
+    current_date = ranking_date or _default_read_date(db)
     if days not in {3, 7, 30}:
         raise HTTPException(status_code=400, detail="days must be one of: 3, 7, 30")
     start_date = current_date - timedelta(days=days)
@@ -220,7 +223,7 @@ def rankings(
     current_user: User = Depends(get_current_user),
 ) -> list[RepoRankingItem]:
     del current_user
-    current_date = ranking_date or date.today()
+    current_date = ranking_date or _default_read_date(db)
     score_attr = {
         "hot": GithubRepoDailyScore.hot_score,
         "rising": GithubRepoDailyScore.rising_score,
@@ -287,7 +290,7 @@ def all_repos(
     current_user: User = Depends(get_current_user),
 ) -> list[RepoRankingItem]:
     del current_user
-    current_date = list_date or date.today()
+    current_date = list_date or _default_read_date(db)
     stmt: Select = (
         select(GithubRepo, GithubRepoDailySnapshot, GithubRepoDailyScore, RepoAiAnalysis)
         .join(GithubRepoDailySnapshot, GithubRepoDailySnapshot.repo_id == GithubRepo.id)
@@ -367,6 +370,35 @@ def _latest_snapshot_date(db: Session) -> date | None:
     return db.scalar(select(func.max(GithubRepoDailySnapshot.snapshot_date)))
 
 
+def _default_read_date(db: Session) -> date:
+    latest_complete_date = _latest_complete_date(db)
+    if latest_complete_date is not None:
+        return latest_complete_date
+    return _latest_snapshot_date(db) or shanghai_today()
+
+
+def _latest_complete_date(db: Session) -> date | None:
+    latest_success = _latest_complete_collection_run(db)
+    return latest_success.run_date if latest_success is not None else None
+
+
+def _latest_complete_collection_run(db: Session):
+    for run in latest_successful_collection_run(db):
+        snapshot_count = _snapshot_count(db, run.run_date)
+        expected_count = run.discovered
+        if expected_count == 0 or snapshot_count >= expected_count:
+            return run
+    return None
+
+
+def _snapshot_count(db: Session, snapshot_date: date) -> int:
+    return db.scalar(
+        select(func.count(GithubRepoDailySnapshot.id)).where(
+            GithubRepoDailySnapshot.snapshot_date == snapshot_date
+        )
+    ) or 0
+
+
 @router.get("/summary")
 def daily_summary(
     summary_date: date | None = Query(default=None, alias="date"),
@@ -374,13 +406,12 @@ def daily_summary(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     del current_user
-    current_date = summary_date or date.today()
+    current_date = summary_date or _default_read_date(db)
+    settings = get_settings()
+    latest_snapshot_date = _latest_snapshot_date(db)
+    latest_complete_date = _latest_complete_date(db)
 
-    snapshot_count = db.scalar(
-        select(func.count(GithubRepoDailySnapshot.id)).where(
-            GithubRepoDailySnapshot.snapshot_date == current_date
-        )
-    ) or 0
+    snapshot_count = _snapshot_count(db, current_date)
     scored_count = db.scalar(
         select(func.count(GithubRepoDailyScore.id)).where(
             GithubRepoDailyScore.score_date == current_date
@@ -427,7 +458,10 @@ def daily_summary(
         "analyzed_count": analyzed_count,
         "total_stars": int(total_stars),
         "total_star_delta_7d": int(total_star_delta_7d),
-        "ai_enabled": get_settings().ai_enabled,
+        "ai_enabled": settings.ai_enabled,
+        "latest_snapshot_date": latest_snapshot_date.isoformat() if latest_snapshot_date else None,
+        "latest_complete_date": latest_complete_date.isoformat() if latest_complete_date else None,
+        "github_daily_repo_limit": settings.github_daily_repo_limit,
         "languages": [{"name": name, "count": count} for name, count in language_rows],
         "categories": [{"name": name, "count": count} for name, count in category_rows],
         "job": get_daily_job_status(),
@@ -481,9 +515,9 @@ def run_daily_job(
     current_user: User = Depends(get_current_user),
 ) -> JobResult:
     del current_user
-    current_date = snapshot_date or date.today()
+    current_date = snapshot_date or shanghai_today()
     snapshot_state = _snapshot_state(db, current_date)
-    if not force and snapshot_state != "missing":
+    if not force and snapshot_state in {"snapshots_already_exist", "snapshot_check_failed"}:
         return JobResult(
             snapshot_date=current_date,
             collection={"skipped": 1, "reason": snapshot_state},
@@ -510,9 +544,9 @@ def run_daily_job_async(
             "snapshot_date": current_status.get("snapshot_date") or "",
         }
 
-    current_date = snapshot_date or date.today()
+    current_date = snapshot_date or shanghai_today()
     snapshot_state = _snapshot_state(db, current_date)
-    if not force and snapshot_state != "missing":
+    if not force and snapshot_state in {"snapshots_already_exist", "snapshot_check_failed"}:
         result = {
             "collection": {"skipped": 1, "reason": snapshot_state},
             "scoring": {"skipped": 1, "reason": "collection_skipped"},
@@ -538,7 +572,7 @@ def run_score_job(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     del current_user
-    current_date = score_date or date.today()
+    current_date = score_date or shanghai_today()
     return ScoreService().calculate_daily_scores(db, current_date)
 
 
@@ -555,12 +589,16 @@ def _run_daily_background(snapshot_date: date) -> None:
 def _snapshot_state(db: Session, snapshot_date: date) -> str:
     for _ in range(2):
         try:
-            count = db.scalar(
-                select(func.count(GithubRepoDailySnapshot.id)).where(
-                    GithubRepoDailySnapshot.snapshot_date == snapshot_date
-                )
-            )
-            return "snapshots_already_exist" if count else "missing"
+            count = _snapshot_count(db, snapshot_date)
+            if not count:
+                return "missing"
+            latest_run = latest_collection_run_for_date(db, snapshot_date)
+            if latest_run is None or latest_run.status != "success":
+                return "partial_snapshots_exist"
+            expected_count = latest_run.discovered
+            if expected_count > 0 and count < expected_count:
+                return "partial_snapshots_exist"
+            return "snapshots_already_exist"
         except Exception:
             db.rollback()
             db.close()

@@ -19,10 +19,9 @@ class Settings(BaseSettings):
     database_url: str
 
     github_token: str | None = None
-    github_per_page: int = Field(default=50, ge=1, le=100)
+    github_per_page: int = Field(default=100, ge=1, le=100)
     github_max_pages_per_query: int = Field(default=2, ge=1, le=10)
     github_daily_repo_limit: int = Field(default=1000, ge=1, le=10000)
-    github_daily_refresh_limit: int = Field(default=500, ge=1, le=10000)
 
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"

@@ -55,6 +55,7 @@ const text = {
     loading: "\u6b63\u5728\u52a0\u8f7d\u699c\u5355...",
     noRanking: "\u6682\u65e0\u699c\u5355\u3002\u5982\u679c\u5df2\u6709\u5feb\u7167\uff0c\u8bf7\u5148\u8ba1\u7b97\u8bc4\u5206\u3002",
     snapshots: "\u4eca\u65e5\u5feb\u7167",
+    dataDate: "\u6570\u636e\u65e5\u671f",
     scored: "\u5df2\u8bc4\u5206",
     totalStars: "\u603b Stars",
     languages: "\u8bed\u8a00\u5206\u5e03",
@@ -106,6 +107,7 @@ const text = {
     loading: "Loading rankings...",
     noRanking: "No ranking yet. If snapshots exist, run Score first.",
     snapshots: "Today Snapshots",
+    dataDate: "Data Date",
     scored: "Scored",
     totalStars: "Total Stars",
     languages: "Languages",
@@ -605,8 +607,9 @@ function SummaryPanel({
       <div className="summary-wide">
         <strong>{stageLabel(job?.stage || null, t)}</strong>
         <span>
-          {job?.status || "idle"} - {t.refreshed} {job?.progress?.refreshed_existing ?? 0},{" "}
-          {t.discovered} {job?.progress?.discovered ?? 0} / 1000
+          {job?.status || "idle"} - {t.discovered} {job?.progress?.discovered ?? 0} /{" "}
+          {summary?.github_daily_repo_limit ?? 0}
+          {summary?.date ? ` · ${t.dataDate} ${summary.date}` : ""}
         </span>
       </div>
       <Distribution title={t.languages} items={summary?.languages ?? []} noneText={t.none} />

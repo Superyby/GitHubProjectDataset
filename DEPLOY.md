@@ -40,7 +40,6 @@ nano .env
 DATABASE_URL=postgresql+psycopg://postgres:你的数据库密码@8.160.161.184:35672/github_project_dataset
 GITHUB_TOKEN=你的 GitHub Token
 GITHUB_DAILY_REPO_LIMIT=1000
-GITHUB_DAILY_REFRESH_LIMIT=500
 DEEPSEEK_API_KEY=你的 DeepSeek Key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-chat

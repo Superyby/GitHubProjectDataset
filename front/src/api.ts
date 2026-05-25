@@ -54,6 +54,8 @@ export type SummaryItem = {
 
 export type DailySummary = {
   date: string;
+  latest_snapshot_date: string | null;
+  latest_complete_date: string | null;
   total_repos: number;
   snapshot_count: number;
   scored_count: number;
@@ -64,6 +66,7 @@ export type DailySummary = {
   languages: SummaryItem[];
   categories: SummaryItem[];
   job: DailyJobStatus;
+  github_daily_repo_limit: number;
 };
 
 export type RepoAiAnalysisResult = {
