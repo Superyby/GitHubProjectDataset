@@ -1,0 +1,1488 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GitHub Project Radar Prototype</title>
+    <style>
+      :root {
+        --canvas: #05060d;
+        --surface: rgba(14, 16, 29, 0.72);
+        --surface-strong: rgba(22, 25, 43, 0.9);
+        --line: rgba(153, 169, 255, 0.2);
+        --line-strong: rgba(184, 197, 255, 0.38);
+        --ink: #f6f7ff;
+        --ink-muted: #c6cbed;
+        --ink-subtle: #8f96bf;
+        --accent: #91a0ff;
+        --cyan: #6be8ff;
+        --pink: #ff7edb;
+        --green: #7df7b1;
+        --gold: #ffd36e;
+        color: var(--ink);
+        background: var(--canvas);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-synthesis: none;
+        text-rendering: optimizeLegibility;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        background: var(--canvas);
+      }
+
+      body {
+        min-width: 320px;
+        margin: 0;
+        cursor: none;
+        overflow-x: hidden;
+        background:
+          radial-gradient(circle at 22% 12%, rgba(145, 160, 255, 0.22), transparent 30vw),
+          radial-gradient(circle at 78% 8%, rgba(107, 232, 255, 0.18), transparent 28vw),
+          radial-gradient(circle at 68% 78%, rgba(255, 126, 219, 0.14), transparent 32vw),
+          linear-gradient(180deg, #080a15 0%, #05060d 48%, #02030a 100%);
+      }
+
+      body::before {
+        position: fixed;
+        inset: 0;
+        z-index: -3;
+        pointer-events: none;
+        content: "";
+        background-image:
+          linear-gradient(rgba(145, 160, 255, 0.07) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(145, 160, 255, 0.07) 1px, transparent 1px);
+        background-size: 44px 44px;
+        mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.9), transparent 86%);
+      }
+
+      body::after {
+        position: fixed;
+        inset: 0;
+        z-index: -2;
+        pointer-events: none;
+        content: "";
+        opacity: 0.45;
+        background-image:
+          radial-gradient(circle, rgba(255, 255, 255, 0.42) 0 1px, transparent 1.4px),
+          radial-gradient(circle, rgba(145, 160, 255, 0.32) 0 1px, transparent 1.5px);
+        background-position:
+          0 0,
+          28px 36px;
+        background-size:
+          118px 118px,
+          164px 164px;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .aurora {
+        position: fixed;
+        inset: auto auto 12% 50%;
+        z-index: -1;
+        width: min(840px, 80vw);
+        height: min(840px, 80vw);
+        border-radius: 999px;
+        background:
+          conic-gradient(from 180deg, rgba(107, 232, 255, 0), rgba(107, 232, 255, 0.24), rgba(255, 126, 219, 0.2), rgba(145, 160, 255, 0.24), rgba(107, 232, 255, 0));
+        filter: blur(72px);
+        opacity: 0.58;
+        transform: translateX(-50%);
+      }
+
+      .cursor-light {
+        position: fixed;
+        z-index: 8;
+        width: 420px;
+        height: 420px;
+        border-radius: 999px;
+        pointer-events: none;
+        background: radial-gradient(circle, rgba(145, 160, 255, 0.18), transparent 62%);
+        mix-blend-mode: screen;
+        transform: translate(-50%, -50%);
+      }
+
+      .cursor-ring,
+      .cursor-dot,
+      .cursor-trail,
+      .click-ripple {
+        position: fixed;
+        z-index: 30;
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+      }
+
+      .cursor-ring {
+        width: 42px;
+        height: 42px;
+        border: 1px solid rgba(107, 232, 255, 0.85);
+        border-radius: 999px;
+        box-shadow:
+          0 0 18px rgba(107, 232, 255, 0.5),
+          inset 0 0 18px rgba(145, 160, 255, 0.18);
+        mix-blend-mode: screen;
+      }
+
+      .cursor-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 999px;
+        background: #ffffff;
+        box-shadow:
+          0 0 10px #ffffff,
+          0 0 22px rgba(107, 232, 255, 0.9);
+      }
+
+      .cursor-trail {
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(107, 232, 255, 0.9), rgba(145, 160, 255, 0));
+        mix-blend-mode: screen;
+      }
+
+      .click-ripple {
+        width: 18px;
+        height: 18px;
+        border: 1px solid rgba(107, 232, 255, 0.9);
+        border-radius: 999px;
+        box-shadow: 0 0 24px rgba(107, 232, 255, 0.58);
+      }
+
+      .app-shell {
+        display: grid;
+        grid-template-columns: 248px minmax(0, 1fr) 350px;
+        min-height: 100vh;
+      }
+
+      .sidebar,
+      .right-rail {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        padding: 20px 16px;
+        border-color: var(--line);
+        background: rgba(5, 6, 13, 0.56);
+        backdrop-filter: blur(24px);
+      }
+
+      .sidebar {
+        border-right: 1px solid var(--line);
+      }
+
+      .right-rail {
+        border-left: 1px solid var(--line);
+        overflow: auto;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 10px 22px;
+      }
+
+      .brand-mark {
+        display: grid;
+        position: relative;
+        width: 32px;
+        height: 32px;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 10px;
+        background: linear-gradient(135deg, rgba(145, 160, 255, 0.95), rgba(107, 232, 255, 0.7));
+        color: #05060d;
+        box-shadow: 0 0 28px rgba(145, 160, 255, 0.52);
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .brand strong {
+        display: block;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .brand span,
+      .nav-label,
+      .muted,
+      .meta {
+        color: var(--ink-subtle);
+        font-size: 12px;
+      }
+
+      .nav-label {
+        margin: 14px 10px 8px;
+      }
+
+      .nav-list {
+        display: grid;
+        gap: 6px;
+      }
+
+      .nav-item,
+      .icon-button,
+      .segmented button,
+      .secondary-button,
+      .primary-button {
+        min-height: 38px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        background: transparent;
+        color: var(--ink-muted);
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        padding: 0 10px;
+      }
+
+      .nav-item span:first-child {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+      }
+
+      .nav-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--ink-subtle);
+      }
+
+      .nav-item.active,
+      .nav-item:hover {
+        border-color: var(--line-strong);
+        background: linear-gradient(135deg, rgba(145, 160, 255, 0.16), rgba(107, 232, 255, 0.08));
+        color: var(--ink);
+      }
+
+      .nav-item.active .nav-dot {
+        background: var(--cyan);
+        box-shadow: 0 0 18px rgba(107, 232, 255, 0.8);
+      }
+
+      .count-pill,
+      .status-pill,
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        padding: 0 8px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--ink-muted);
+        font-size: 12px;
+      }
+
+      .sidebar-card,
+      .hero-panel,
+      .metric-card,
+      .chart-card,
+      .repo-row,
+      .right-panel {
+        position: relative;
+        border: 1px solid var(--line);
+        background: var(--surface);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.08),
+          0 18px 60px rgba(0, 0, 0, 0.24);
+        backdrop-filter: blur(22px);
+      }
+
+      .hero-panel::before,
+      .repo-row::before,
+      .right-panel::before {
+        position: absolute;
+        inset: 0;
+        padding: 1px;
+        border-radius: inherit;
+        pointer-events: none;
+        content: "";
+        background: linear-gradient(135deg, rgba(107, 232, 255, 0.45), transparent 36%, rgba(255, 126, 219, 0.28));
+        mask:
+          linear-gradient(#000 0 0) content-box,
+          linear-gradient(#000 0 0);
+        mask-composite: exclude;
+      }
+
+      .sidebar-card {
+        margin: 18px 4px 0;
+        padding: 14px;
+        border-radius: 14px;
+      }
+
+      .sidebar-card strong {
+        display: block;
+        margin-bottom: 10px;
+        font-size: 13px;
+      }
+
+      .progress-track {
+        height: 7px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .progress-fill {
+        width: 68%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--cyan), var(--accent), var(--pink));
+        box-shadow: 0 0 18px rgba(107, 232, 255, 0.55);
+        transform-origin: left;
+      }
+
+      .main {
+        min-width: 0;
+        padding: 24px 26px 48px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 22px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 10px;
+        color: var(--cyan);
+        font-size: 13px;
+      }
+
+      .eyebrow::before {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--cyan);
+        box-shadow: 0 0 16px rgba(107, 232, 255, 0.8);
+        content: "";
+      }
+
+      h1 {
+        margin: 0;
+        color: var(--ink);
+        font-size: clamp(30px, 4vw, 54px);
+        font-weight: 760;
+        letter-spacing: 0;
+        line-height: 1.02;
+      }
+
+      .gradient-text {
+        background: linear-gradient(90deg, #ffffff, #bfc7ff 42%, #6be8ff 72%, #ffb8ea);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .top-actions {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
+      .icon-button,
+      .secondary-button,
+      .primary-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 0 12px;
+      }
+
+      .icon-button,
+      .secondary-button {
+        border-color: var(--line);
+        background: rgba(255, 255, 255, 0.055);
+        color: var(--ink-muted);
+      }
+
+      .primary-button {
+        border-color: rgba(145, 160, 255, 0.74);
+        background: linear-gradient(135deg, rgba(145, 160, 255, 0.94), rgba(107, 232, 255, 0.8));
+        color: #05060d;
+        box-shadow: 0 0 34px rgba(145, 160, 255, 0.38);
+        font-weight: 750;
+      }
+
+      .hero-panel {
+        display: grid;
+        grid-template-columns: minmax(0, 1.08fr) minmax(300px, 0.92fr);
+        gap: 18px;
+        overflow: hidden;
+        padding: 20px;
+        border-radius: 18px;
+      }
+
+      .hero-panel::after {
+        position: absolute;
+        inset: auto -12% -55% 24%;
+        height: 340px;
+        pointer-events: none;
+        content: "";
+        background: radial-gradient(ellipse, rgba(107, 232, 255, 0.25), transparent 68%);
+      }
+
+      .signal {
+        position: relative;
+        z-index: 1;
+      }
+
+      .signal h2 {
+        max-width: 720px;
+        margin: 0;
+        font-size: clamp(24px, 3.4vw, 42px);
+        font-weight: 740;
+        letter-spacing: 0;
+        line-height: 1.08;
+      }
+
+      .signal p {
+        max-width: 700px;
+        margin: 14px 0 20px;
+        color: var(--ink-muted);
+        line-height: 1.7;
+      }
+
+      .signal-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .metric-card {
+        min-height: 104px;
+        padding: 14px;
+        overflow: hidden;
+        border-radius: 14px;
+      }
+
+      .metric-card::after {
+        position: absolute;
+        inset: auto -30px -46px auto;
+        width: 92px;
+        height: 92px;
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(107, 232, 255, 0.24), transparent 68%);
+        content: "";
+      }
+
+      .metric-card span,
+      .repo-meta,
+      .repo-description,
+      .analysis-copy {
+        color: var(--ink-muted);
+        font-size: 13px;
+      }
+
+      .metric-card span {
+        display: block;
+        min-height: 18px;
+      }
+
+      .metric-card strong {
+        display: block;
+        margin-top: 8px;
+        font-size: 26px;
+        font-weight: 760;
+      }
+
+      .metric-card em {
+        display: block;
+        margin-top: 5px;
+        color: var(--green);
+        font-size: 12px;
+        font-style: normal;
+      }
+
+      .chart-card {
+        z-index: 1;
+        padding: 16px;
+        border-radius: 14px;
+        background: rgba(2, 3, 10, 0.66);
+      }
+
+      .chart-head,
+      .repo-title,
+      .score-line,
+      .side-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .orbital {
+        position: relative;
+        display: grid;
+        min-height: 212px;
+        margin-top: 14px;
+        place-items: center;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background:
+          radial-gradient(circle at 50% 50%, rgba(145, 160, 255, 0.2), transparent 28%),
+          radial-gradient(circle at 50% 50%, rgba(107, 232, 255, 0.08), transparent 50%),
+          rgba(255, 255, 255, 0.035);
+      }
+
+      .orbit-ring {
+        position: absolute;
+        border: 1px solid rgba(145, 160, 255, 0.22);
+        border-radius: 999px;
+      }
+
+      .orbit-ring.one {
+        width: 82%;
+        height: 46%;
+      }
+
+      .orbit-ring.two {
+        width: 62%;
+        height: 62%;
+        transform: rotate(52deg);
+      }
+
+      .orbit-ring.three {
+        width: 42%;
+        height: 76%;
+        transform: rotate(-42deg);
+      }
+
+      .radar-core {
+        z-index: 1;
+        display: grid;
+        width: 112px;
+        height: 112px;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(107, 232, 255, 0.22), rgba(145, 160, 255, 0.08) 60%, transparent);
+        box-shadow:
+          inset 0 0 28px rgba(107, 232, 255, 0.2),
+          0 0 44px rgba(145, 160, 255, 0.26);
+        font-size: 30px;
+        font-weight: 800;
+      }
+
+      .chart {
+        display: flex;
+        align-items: end;
+        gap: 7px;
+        height: 116px;
+        margin-top: 14px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background:
+          linear-gradient(rgba(145, 160, 255, 0.1) 1px, transparent 1px) 0 0 / 100% 25%,
+          rgba(255, 255, 255, 0.035);
+      }
+
+      .bar {
+        flex: 1;
+        min-width: 8px;
+        border-radius: 6px 6px 2px 2px;
+        background: linear-gradient(180deg, var(--cyan), var(--accent), var(--pink));
+        box-shadow: 0 0 16px rgba(107, 232, 255, 0.26);
+        transform-origin: bottom;
+      }
+
+      .filters {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin: 18px 0 12px;
+      }
+
+      .segmented {
+        display: flex;
+        gap: 6px;
+        padding: 5px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.045);
+        backdrop-filter: blur(18px);
+      }
+
+      .segmented button {
+        min-width: 76px;
+        padding: 0 10px;
+      }
+
+      .segmented button.active {
+        background: rgba(145, 160, 255, 0.18);
+        color: var(--ink);
+        box-shadow: inset 0 0 0 1px rgba(145, 160, 255, 0.24);
+      }
+
+      .search {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        width: min(380px, 100%);
+        min-height: 42px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.055);
+        color: var(--ink-subtle);
+        backdrop-filter: blur(18px);
+      }
+
+      .search input {
+        width: 100%;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--ink);
+      }
+
+      .repo-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .repo-row {
+        --scan-x: -120%;
+        display: grid;
+        grid-template-columns: 44px minmax(0, 1fr) 250px;
+        gap: 14px;
+        align-items: center;
+        padding: 15px;
+        overflow: hidden;
+        border-radius: 14px;
+        clip-path: inset(0 100% 0 0 round 14px);
+        transform-origin: 92% -60px;
+        transition:
+          border-color 180ms ease,
+          transform 180ms ease,
+          background 180ms ease;
+      }
+
+      .repo-row::after {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        pointer-events: none;
+        content: "";
+        background: linear-gradient(
+          100deg,
+          transparent 0%,
+          rgba(107, 232, 255, 0.08) 32%,
+          rgba(255, 255, 255, 0.52) 48%,
+          rgba(255, 126, 219, 0.12) 62%,
+          transparent 100%
+        );
+        transform: translateX(var(--scan-x));
+      }
+
+      .repo-row:hover {
+        border-color: rgba(107, 232, 255, 0.42);
+        background: rgba(22, 25, 43, 0.82);
+        transform: translateY(-2px);
+      }
+
+      .rank {
+        color: var(--cyan);
+        font-weight: 800;
+        text-shadow: 0 0 18px rgba(107, 232, 255, 0.46);
+      }
+
+      .repo-title strong {
+        overflow: hidden;
+        color: var(--ink);
+        font-size: 15px;
+        font-weight: 760;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .repo-description {
+        margin: 7px 0 10px;
+        line-height: 1.55;
+      }
+
+      .repo-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .score-block {
+        display: grid;
+        gap: 10px;
+      }
+
+      .score-line strong {
+        font-size: 18px;
+      }
+
+      .spark {
+        width: 100%;
+        height: 42px;
+      }
+
+      .spark path {
+        fill: none;
+        stroke: var(--cyan);
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 2;
+        filter: drop-shadow(0 0 5px rgba(107, 232, 255, 0.65));
+      }
+
+      .repo-meta .tag {
+        transform-origin: left center;
+      }
+
+      .right-panel {
+        padding: 16px;
+        border-radius: 14px;
+      }
+
+      .right-panel + .right-panel {
+        margin-top: 12px;
+      }
+
+      .side-head h2 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 700;
+      }
+
+      .analysis-copy {
+        margin: 12px 0;
+        line-height: 1.65;
+      }
+
+      .insight-list {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .insight {
+        padding: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      .insight strong {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 13px;
+      }
+
+      .timeline {
+        display: grid;
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .timeline-item {
+        display: grid;
+        grid-template-columns: 18px minmax(0, 1fr);
+        gap: 9px;
+      }
+
+      .dot {
+        width: 9px;
+        height: 9px;
+        margin-top: 5px;
+        border-radius: 999px;
+        background: var(--cyan);
+        box-shadow: 0 0 18px rgba(107, 232, 255, 0.9);
+      }
+
+      .timeline-item strong {
+        display: block;
+        font-size: 13px;
+      }
+
+      .timeline-item span {
+        color: var(--ink-subtle);
+        font-size: 12px;
+      }
+
+      .language-bar {
+        height: 8px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .language-bar span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--cyan), var(--accent));
+        transform-origin: left;
+      }
+
+      .mobile-top {
+        display: none;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          scroll-behavior: auto !important;
+          transition-duration: 0.001ms !important;
+        }
+
+        body {
+          cursor: auto;
+        }
+
+        .cursor-light,
+        .cursor-ring,
+        .cursor-dot,
+        .cursor-trail,
+        .click-ripple {
+          display: none;
+        }
+      }
+
+      @media (max-width: 1180px) {
+        .app-shell {
+          grid-template-columns: 84px minmax(0, 1fr);
+        }
+
+        .sidebar {
+          padding: 14px 10px;
+        }
+
+        .brand strong,
+        .brand span,
+        .nav-item .label,
+        .nav-label,
+        .count-pill,
+        .sidebar-card {
+          display: none;
+        }
+
+        .brand {
+          justify-content: center;
+          padding-inline: 0;
+        }
+
+        .nav-item {
+          justify-content: center;
+          padding: 0;
+        }
+
+        .right-rail {
+          grid-column: 2;
+          position: static;
+          height: auto;
+          padding-top: 0;
+          border-left: 0;
+          background: transparent;
+        }
+      }
+
+      @media (max-width: 900px) {
+        .app-shell {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          display: none;
+        }
+
+        .main,
+        .right-rail {
+          grid-column: 1;
+          padding-inline: 14px;
+        }
+
+        .mobile-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          margin-bottom: 16px;
+        }
+
+        .hero-panel {
+          grid-template-columns: 1fr;
+        }
+
+        .signal-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .filters,
+        .topbar {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .segmented,
+        .search {
+          width: 100%;
+        }
+
+        .segmented button {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .repo-row {
+          grid-template-columns: 34px minmax(0, 1fr);
+        }
+
+        .score-block {
+          grid-column: 1 / -1;
+        }
+      }
+
+      @media (max-width: 540px) {
+        h1 {
+          font-size: 30px;
+        }
+
+        .signal-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .metric-card {
+          min-height: 86px;
+        }
+
+        .orbital {
+          min-height: 178px;
+        }
+
+        .chart {
+          height: 104px;
+        }
+
+        .top-actions {
+          justify-content: stretch;
+        }
+
+        .top-actions button,
+        .primary-button,
+        .secondary-button {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="aurora" aria-hidden="true"></div>
+    <div class="cursor-light" aria-hidden="true"></div>
+    <div class="cursor-ring" aria-hidden="true"></div>
+    <div class="cursor-dot" aria-hidden="true"></div>
+    <div class="cursor-trail" aria-hidden="true"></div>
+    <div class="cursor-trail" aria-hidden="true"></div>
+    <div class="cursor-trail" aria-hidden="true"></div>
+    <div class="cursor-trail" aria-hidden="true"></div>
+    <div class="cursor-trail" aria-hidden="true"></div>
+    <div class="cursor-trail" aria-hidden="true"></div>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <span class="brand-mark">R</span>
+          <div>
+            <strong>Project Radar</strong>
+            <span>GitHub dataset</span>
+          </div>
+        </div>
+        <div class="nav-label">榜单</div>
+        <nav class="nav-list">
+          <button class="nav-item active"><span><span class="nav-dot"></span><span class="label">热门项目</span></span><span class="count-pill">100</span></button>
+          <button class="nav-item"><span><span class="nav-dot"></span><span class="label">新星项目</span></span><span class="count-pill">64</span></button>
+          <button class="nav-item"><span><span class="nav-dot"></span><span class="label">加速增长</span></span><span class="count-pill">38</span></button>
+          <button class="nav-item"><span><span class="nav-dot"></span><span class="label">全部项目</span></span><span class="count-pill">12k</span></button>
+        </nav>
+        <div class="nav-label">任务</div>
+        <nav class="nav-list">
+          <button class="nav-item"><span><span class="nav-dot"></span><span class="label">每日采集</span></span></button>
+          <button class="nav-item"><span><span class="nav-dot"></span><span class="label">AI 分析队列</span></span></button>
+        </nav>
+        <div class="sidebar-card">
+          <strong>今日采集进度</strong>
+          <div class="progress-track"><div class="progress-fill"></div></div>
+          <p class="muted">已发现 682 / 1000，失败 3 个请求。</p>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="mobile-top">
+          <div class="brand">
+            <span class="brand-mark">R</span>
+            <div>
+              <strong>Project Radar</strong>
+              <span>GitHub dataset</span>
+            </div>
+          </div>
+          <button class="icon-button" aria-label="打开菜单">菜单</button>
+        </div>
+
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Daily open source intelligence</p>
+            <h1><span class="gradient-text">每日开源项目雷达</span></h1>
+          </div>
+          <div class="top-actions">
+            <button class="secondary-button">切换语言</button>
+            <button class="secondary-button">暗色模式</button>
+            <button class="primary-button">计算评分</button>
+          </div>
+        </header>
+
+        <section class="hero-panel" aria-label="今日概览">
+          <div class="signal">
+            <h2>从 GitHub 增长信号里捕捉正在升空的开源项目。</h2>
+            <p>
+              这个版本把原型改成更具视觉冲击的雷达驾驶舱：星图背景、玻璃卡片、流光边框、动态指标和实时趋势感，适合做产品首页或数据大屏方向。
+            </p>
+            <div class="signal-grid">
+              <div class="metric-card">
+                <span>今日快照</span>
+                <strong class="counter" data-value="12846">0</strong>
+                <em>+682 新发现</em>
+              </div>
+              <div class="metric-card">
+                <span>已评分项目</span>
+                <strong class="counter" data-value="8304">0</strong>
+                <em>覆盖 64.6%</em>
+              </div>
+              <div class="metric-card">
+                <span>总 Stars</span>
+                <strong>48.2M</strong>
+                <em>7 日 +3.8%</em>
+              </div>
+              <div class="metric-card">
+                <span>AI 待分析</span>
+                <strong class="counter" data-value="126">0</strong>
+                <em>队列稳定</em>
+              </div>
+            </div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-head">
+              <strong>增长星图</strong>
+              <span class="status-pill">Momentum live</span>
+            </div>
+            <div class="orbital" aria-label="项目雷达图">
+              <span class="orbit-ring one"></span>
+              <span class="orbit-ring two"></span>
+              <span class="orbit-ring three"></span>
+              <div class="radar-core">AI</div>
+            </div>
+            <div class="chart" aria-label="7 日增长柱状图">
+              <span class="bar" style="height: 34%"></span>
+              <span class="bar" style="height: 52%"></span>
+              <span class="bar" style="height: 43%"></span>
+              <span class="bar" style="height: 68%"></span>
+              <span class="bar" style="height: 74%"></span>
+              <span class="bar" style="height: 58%"></span>
+              <span class="bar" style="height: 86%"></span>
+              <span class="bar" style="height: 62%"></span>
+              <span class="bar" style="height: 92%"></span>
+              <span class="bar" style="height: 77%"></span>
+            </div>
+          </div>
+        </section>
+
+        <section class="filters" aria-label="筛选">
+          <div class="segmented">
+            <button class="active">热门</button>
+            <button>新星</button>
+            <button>加速</button>
+            <button>TopN</button>
+          </div>
+          <label class="search">
+            <span>Search</span>
+            <input placeholder="搜索项目、语言、主题、趋势" />
+          </label>
+        </section>
+
+        <section class="repo-list" aria-label="项目榜单">
+          <article class="repo-row">
+            <div class="rank">#1</div>
+            <div>
+              <div class="repo-title">
+                <strong>microsoft/generative-ai-for-beginners</strong>
+                <span class="tag">AI 教程</span>
+              </div>
+              <p class="repo-description">面向开发者的生成式 AI 入门课程，近期被多个教育仓库引用，增长稳定。</p>
+              <div class="repo-meta">
+                <span class="tag">Python</span><span class="tag">llm</span><span class="tag">education</span><span class="tag">agents</span>
+              </div>
+            </div>
+            <div class="score-block">
+              <div class="score-line"><span class="muted">Stars</span><strong>84.6k</strong></div>
+              <svg class="spark" viewBox="0 0 220 42" role="img"><path d="M2 34 C38 30, 50 22, 78 24 S128 14, 154 18 S190 6, 218 9" /></svg>
+            </div>
+          </article>
+
+          <article class="repo-row">
+            <div class="rank">#2</div>
+            <div>
+              <div class="repo-title">
+                <strong>langchain-ai/langgraph</strong>
+                <span class="tag">Agent 框架</span>
+              </div>
+              <p class="repo-description">Agent 编排和状态图工作流持续升温，贡献者增长快，生态集成频繁。</p>
+              <div class="repo-meta">
+                <span class="tag">Python</span><span class="tag">workflow</span><span class="tag">agent</span><span class="tag">graph</span>
+              </div>
+            </div>
+            <div class="score-block">
+              <div class="score-line"><span class="muted">7 日增长</span><strong>+2,408</strong></div>
+              <svg class="spark" viewBox="0 0 220 42" role="img"><path d="M2 36 C28 32, 46 34, 70 26 S112 18, 138 19 S176 10, 218 5" /></svg>
+            </div>
+          </article>
+
+          <article class="repo-row">
+            <div class="rank">#3</div>
+            <div>
+              <div class="repo-title">
+                <strong>modelcontextprotocol/servers</strong>
+                <span class="tag">基础设施</span>
+              </div>
+              <p class="repo-description">MCP 服务集合带动工具连接生态扩张，主题热度和 issue 活跃度同步上升。</p>
+              <div class="repo-meta">
+                <span class="tag">TypeScript</span><span class="tag">mcp</span><span class="tag">tools</span><span class="tag">protocol</span>
+              </div>
+            </div>
+            <div class="score-block">
+              <div class="score-line"><span class="muted">评分</span><strong>96.42</strong></div>
+              <svg class="spark" viewBox="0 0 220 42" role="img"><path d="M2 30 C30 28, 54 31, 76 25 S118 22, 140 15 S180 19, 218 8" /></svg>
+            </div>
+          </article>
+        </section>
+      </main>
+
+      <aside class="right-rail" aria-label="AI 分析和任务状态">
+        <section class="right-panel">
+          <div class="side-head">
+            <h2>AI 趋势解读</h2>
+            <span class="status-pill">DeepSeek</span>
+          </div>
+          <p class="analysis-copy">
+            当前榜单的共同信号是“可组合 AI 工具链”：教程、Agent 编排、协议服务器三类项目同时增长。
+          </p>
+          <div class="insight-list">
+            <div class="insight">
+              <strong>亮点</strong>
+              <span class="muted">开发者教育内容正在成为项目增长入口。</span>
+            </div>
+            <div class="insight">
+              <strong>风险</strong>
+              <span class="muted">短期 Star 激增可能来自发布事件，需要观察 30 日留存。</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="right-panel">
+          <div class="side-head">
+            <h2>采集流水线</h2>
+            <span class="status-pill">运行中</span>
+          </div>
+          <div class="timeline">
+            <div class="timeline-item">
+              <span class="dot"></span>
+              <div><strong>GitHub Search 候选采集</strong><span>682 / 1000 completed</span></div>
+            </div>
+            <div class="timeline-item">
+              <span class="dot"></span>
+              <div><strong>仓库快照刷新</strong><span>8,304 repos scored</span></div>
+            </div>
+            <div class="timeline-item">
+              <span class="dot"></span>
+              <div><strong>AI 分析队列</strong><span>126 repos pending</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="right-panel">
+          <div class="side-head">
+            <h2>语言分布</h2>
+            <span class="status-pill">Top 5</span>
+          </div>
+          <div class="insight-list">
+            <div class="score-line"><span class="muted">TypeScript</span><strong>34%</strong></div>
+            <div class="language-bar"><span style="width: 34%"></span></div>
+            <div class="score-line"><span class="muted">Python</span><strong>29%</strong></div>
+            <div class="language-bar"><span style="width: 29%"></span></div>
+            <div class="score-line"><span class="muted">Go</span><strong>14%</strong></div>
+            <div class="language-bar"><span style="width: 14%"></span></div>
+            <div class="score-line"><span class="muted">Rust</span><strong>9%</strong></div>
+            <div class="language-bar"><span style="width: 9%"></span></div>
+          </div>
+        </section>
+      </aside>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>
+    <script>
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      if (!reduceMotion && window.gsap) {
+        gsap.set([".sidebar", ".right-rail", ".topbar", ".hero-panel", ".filters", ".repo-row", ".right-panel"], {
+          autoAlpha: 0,
+          y: 18
+        });
+        gsap.set(".repo-row", {
+          x: 360,
+          y: -140,
+          rotationZ: 9,
+          rotationX: 7,
+          scale: 0.9,
+          filter: "blur(8px)",
+          transformOrigin: "92% -60px",
+          clipPath: "inset(0 0% 0 0 round 14px)"
+        });
+        gsap.set(".repo-row > *", {
+          autoAlpha: 0,
+          x: 24,
+          y: -8
+        });
+        gsap.set(".repo-meta .tag", {
+          autoAlpha: 0,
+          scale: 0.72,
+          x: -8
+        });
+
+        const intro = gsap.timeline({ defaults: { ease: "power3.out" } });
+        intro
+          .to(".sidebar", { autoAlpha: 1, y: 0, duration: 0.7 })
+          .to(".topbar", { autoAlpha: 1, y: 0, duration: 0.7 }, "-=0.42")
+          .to(".hero-panel", { autoAlpha: 1, y: 0, duration: 0.85 }, "-=0.34")
+          .to(".filters", { autoAlpha: 1, y: 0, duration: 0.55 }, "-=0.42")
+          .to(".repo-row", {
+            autoAlpha: 1,
+            y: 0,
+            x: 0,
+            rotationZ: 0,
+            rotationX: 0,
+            scale: 1,
+            filter: "blur(0px)",
+            stagger: {
+              each: 0.18,
+              from: "start"
+            },
+            duration: 1.15,
+            ease: "elastic.out(1, 0.72)"
+          }, "-=0.22")
+          .to(".repo-row", {
+            "--scan-x": "120%",
+            stagger: 0.16,
+            duration: 0.82,
+            ease: "power2.out"
+          }, "-=0.86")
+          .to(".repo-row > *", {
+            autoAlpha: 1,
+            x: 0,
+            y: 0,
+            stagger: {
+              each: 0.04,
+              from: "start",
+              grid: "auto"
+            },
+            duration: 0.5
+          }, "-=0.82")
+          .to(".repo-meta .tag", {
+            autoAlpha: 1,
+            scale: 1,
+            x: 0,
+            stagger: 0.035,
+            duration: 0.42,
+            ease: "back.out(1.7)"
+          }, "-=0.48")
+          .add(() => {
+            gsap.to(".repo-row", {
+              y: (index) => (index % 2 === 0 ? -3 : 3),
+              duration: 3.4,
+              repeat: -1,
+              yoyo: true,
+              stagger: 0.18,
+              ease: "sine.inOut"
+            });
+          })
+          .to(".right-rail", { autoAlpha: 1, y: 0, duration: 0.65 }, "-=0.8")
+          .to(".right-panel", { autoAlpha: 1, y: 0, stagger: 0.08, duration: 0.55 }, "-=0.5");
+
+        gsap.to(".aurora", {
+          rotate: 360,
+          scale: 1.08,
+          duration: 28,
+          repeat: -1,
+          yoyo: true,
+          ease: "sine.inOut"
+        });
+
+        gsap.to(".orbit-ring.one", { rotate: 360, duration: 16, repeat: -1, ease: "none" });
+        gsap.to(".orbit-ring.two", { rotate: -360, duration: 20, repeat: -1, ease: "none" });
+        gsap.to(".orbit-ring.three", { rotate: 360, duration: 24, repeat: -1, ease: "none" });
+        gsap.to(".radar-core", { scale: 1.08, duration: 1.7, repeat: -1, yoyo: true, ease: "sine.inOut" });
+        gsap.to(".dot, .brand-mark", { boxShadow: "0 0 34px rgba(107, 232, 255, 0.95)", duration: 1.4, repeat: -1, yoyo: true });
+
+        const cursorRing = document.querySelector(".cursor-ring");
+        const cursorDot = document.querySelector(".cursor-dot");
+        const cursorTrails = gsap.utils.toArray(".cursor-trail");
+        gsap.set([".cursor-ring", ".cursor-dot", ".cursor-light", ".cursor-trail"], {
+          x: window.innerWidth / 2,
+          y: window.innerHeight / 2
+        });
+
+        window.addEventListener("pointermove", (event) => {
+          gsap.to(".cursor-light", {
+            x: event.clientX,
+            y: event.clientY,
+            duration: 0.45,
+            ease: "power2.out"
+          });
+          gsap.to(cursorRing, {
+            x: event.clientX,
+            y: event.clientY,
+            duration: 0.18,
+            ease: "power3.out"
+          });
+          gsap.to(cursorDot, {
+            x: event.clientX,
+            y: event.clientY,
+            duration: 0.04,
+            ease: "none"
+          });
+          cursorTrails.forEach((trail, index) => {
+            gsap.to(trail, {
+              x: event.clientX,
+              y: event.clientY,
+              scale: 1 - index * 0.085,
+              opacity: 0.48 - index * 0.06,
+              duration: 0.2 + index * 0.055,
+              ease: "power2.out"
+            });
+          });
+        });
+
+        document.querySelectorAll("button, input, .repo-row").forEach((target) => {
+          target.addEventListener("pointerenter", () => {
+            gsap.to(cursorRing, {
+              width: 58,
+              height: 58,
+              borderColor: "rgba(255, 126, 219, 0.88)",
+              duration: 0.22
+            });
+            gsap.to(cursorDot, { scale: 0.65, duration: 0.2 });
+          });
+          target.addEventListener("pointerleave", () => {
+            gsap.to(cursorRing, {
+              width: 42,
+              height: 42,
+              borderColor: "rgba(107, 232, 255, 0.85)",
+              duration: 0.22
+            });
+            gsap.to(cursorDot, { scale: 1, duration: 0.2 });
+          });
+        });
+
+        window.addEventListener("pointerdown", (event) => {
+          const ripple = document.createElement("span");
+          ripple.className = "click-ripple";
+          document.body.appendChild(ripple);
+          gsap.set(ripple, { x: event.clientX, y: event.clientY, scale: 0.25, opacity: 1 });
+          gsap.to(ripple, {
+            scale: 4.2,
+            opacity: 0,
+            duration: 0.7,
+            ease: "power2.out",
+            onComplete: () => ripple.remove()
+          });
+          gsap.fromTo(cursorRing, { scale: 0.72 }, { scale: 1, duration: 0.36, ease: "elastic.out(1, 0.45)" });
+        });
+
+        document.querySelectorAll(".repo-row, .metric-card, .right-panel").forEach((card) => {
+          card.addEventListener("pointermove", (event) => {
+            const rect = card.getBoundingClientRect();
+            const x = (event.clientX - rect.left) / rect.width - 0.5;
+            const y = (event.clientY - rect.top) / rect.height - 0.5;
+            gsap.to(card, { rotateX: y * -3, rotateY: x * 4, duration: 0.3, transformPerspective: 900 });
+          });
+          card.addEventListener("pointerleave", () => {
+            gsap.to(card, { rotateX: 0, rotateY: 0, duration: 0.35 });
+          });
+        });
+      }
+
+      if (!reduceMotion && window.anime) {
+        anime({
+          targets: ".bar",
+          scaleY: [0.08, 1],
+          opacity: [0.4, 1],
+          delay: anime.stagger(70, { start: 700 }),
+          duration: 950,
+          easing: "easeOutExpo"
+        });
+
+        anime({
+          targets: ".spark path",
+          strokeDashoffset: [anime.setDashoffset, 0],
+          delay: anime.stagger(140, { start: 1000 }),
+          duration: 1100,
+          easing: "easeInOutSine"
+        });
+
+        anime({
+          targets: ".progress-fill, .language-bar span",
+          scaleX: [0, 1],
+          delay: anime.stagger(90, { start: 900 }),
+          duration: 900,
+          easing: "easeOutQuart"
+        });
+
+        document.querySelectorAll(".counter").forEach((node) => {
+          const value = Number(node.dataset.value || 0);
+          anime({
+            targets: { count: 0 },
+            count: value,
+            round: 1,
+            duration: 1400,
+            easing: "easeOutCubic",
+            update(animation) {
+              node.textContent = Number(animation.animatables[0].target.count).toLocaleString("zh-CN");
+            }
+          });
+        });
+      }
+    </script>
+  </body>
+</html>

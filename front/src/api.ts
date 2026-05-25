@@ -215,19 +215,30 @@ export async function fetchTrendRanking(days: TrendDays, date?: string): Promise
 }
 
 export async function fetchAllRepos(query?: string, date?: string): Promise<RepoRankingItem[]> {
-  const params = new URLSearchParams({ limit: "200" });
-  if (date) {
-    params.set("date", date);
-  }
-  if (query?.trim()) {
-    params.set("q", query.trim());
-  }
+  const limit = 1000;
+  const repos: RepoRankingItem[] = [];
+  const keyword = query?.trim();
 
-  const response = await apiFetch(`/api/repos?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch all repos: ${response.status}`);
+  for (let offset = 0; ; offset += limit) {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (date) {
+      params.set("date", date);
+    }
+    if (keyword) {
+      params.set("q", keyword);
+    }
+
+    const response = await apiFetch(`/api/repos?${params.toString()}`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch all repos: ${response.status}`);
+    }
+
+    const page: RepoRankingItem[] = await response.json();
+    repos.push(...page);
+    if (page.length < limit) {
+      return repos.sort((left, right) => right.stars - left.stars);
+    }
   }
-  return response.json();
 }
 
 export async function fetchSummary(date?: string): Promise<DailySummary> {

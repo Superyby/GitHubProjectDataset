@@ -1,6 +1,6 @@
-import { BarChart3, Bot, Flame, Github, Languages, LineChart, LogOut, Mail, Moon, Rocket, Search, Star, Sun, TrendingUp, UserPlus } from "lucide-react";
-import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { BarChart3, Bot, ChevronLeft, ChevronRight, Flame, Github, Languages, LineChart, LogOut, Mail, Moon, Rocket, Search, Star, Sun, TrendingUp, UserPlus } from "lucide-react";
+import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   analyzeRepo,
   AuthUser,
@@ -54,6 +54,10 @@ const text = {
     search: "\u641c\u7d22\u9879\u76ee\u3001\u8bed\u8a00\u3001\u4e3b\u9898\u3001\u8d8b\u52bf",
     loading: "\u6b63\u5728\u52a0\u8f7d\u699c\u5355...",
     noRanking: "\u6682\u65e0\u699c\u5355\u3002\u5982\u679c\u5df2\u6709\u5feb\u7167\uff0c\u8bf7\u5148\u8ba1\u7b97\u8bc4\u5206\u3002",
+    pageInfo: "\u7b2c {page} / {total} \u9875",
+    pageRows: "\u5171 {count} \u4e2a\u9879\u76ee",
+    prevPage: "\u4e0a\u4e00\u9875",
+    nextPage: "\u4e0b\u4e00\u9875",
     snapshots: "\u4eca\u65e5\u5feb\u7167",
     dataDate: "\u6570\u636e\u65e5\u671f",
     scored: "\u5df2\u8bc4\u5206",
@@ -106,6 +110,10 @@ const text = {
     search: "Search repo, language, topic, trend",
     loading: "Loading rankings...",
     noRanking: "No ranking yet. If snapshots exist, run Score first.",
+    pageInfo: "Page {page} / {total}",
+    pageRows: "{count} repos",
+    prevPage: "Previous page",
+    nextPage: "Next page",
     snapshots: "Today Snapshots",
     dataDate: "Data Date",
     scored: "Scored",
@@ -147,6 +155,11 @@ export function App() {
   const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
     if (!getStoredToken()) {
       setAuthChecked(true);
       return;
@@ -164,30 +177,158 @@ export function App() {
   }, []);
 
   if (!authChecked) {
-    return <div className="auth-loading">GitHub Project Radar</div>;
+    return (
+      <>
+        <VisualEffects />
+        <div className="auth-loading">GitHub Project Radar</div>
+      </>
+    );
   }
 
   if (!user) {
     return (
-      <AuthScreen
-        locale={locale}
-        theme={theme}
-        setLocale={setLocale}
-        setTheme={setTheme}
-        onAuthed={setUser}
-      />
+      <>
+        <VisualEffects />
+        <AuthScreen
+          locale={locale}
+          theme={theme}
+          setLocale={setLocale}
+          setTheme={setTheme}
+          onAuthed={setUser}
+        />
+      </>
     );
   }
 
   return (
-    <RadarApp
-      locale={locale}
-      theme={theme}
-      setLocale={setLocale}
-      setTheme={setTheme}
-      user={user}
-      onLogout={() => setUser(null)}
-    />
+    <>
+      <VisualEffects />
+      <RadarApp
+        locale={locale}
+        theme={theme}
+        setLocale={setLocale}
+        setTheme={setTheme}
+        user={user}
+        onLogout={() => setUser(null)}
+      />
+    </>
+  );
+}
+
+function VisualEffects() {
+  const cursorRef = useRef<HTMLDivElement | null>(null);
+  const dotRef = useRef<HTMLDivElement | null>(null);
+  const glowRef = useRef<HTMLDivElement | null>(null);
+  const trailRefs = useRef<Array<HTMLDivElement | null>>([]);
+
+  useEffect(() => {
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const finePointer = window.matchMedia("(pointer: fine)").matches;
+    if (reduceMotion || !finePointer) {
+      return;
+    }
+
+    let x = window.innerWidth / 2;
+    let y = window.innerHeight / 2;
+    let ringX = x;
+    let ringY = y;
+    const trail = trailRefs.current.map(() => ({ x, y }));
+    let frame = 0;
+    let scrolling = false;
+    let scrollTimer = 0;
+
+    function render() {
+      ringX += (x - ringX) * 0.22;
+      ringY += (y - ringY) * 0.22;
+      if (cursorRef.current) {
+        cursorRef.current.style.transform = `translate3d(${ringX}px, ${ringY}px, 0) translate(-50%, -50%)`;
+      }
+      if (dotRef.current) {
+        dotRef.current.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`;
+      }
+      if (glowRef.current) {
+        glowRef.current.style.transform = `translate3d(${ringX}px, ${ringY}px, 0) translate(-50%, -50%)`;
+      }
+      if (!scrolling) {
+        trailRefs.current.forEach((node, index) => {
+          if (!node) {
+            return;
+          }
+          const point = trail[index];
+          point.x += (x - point.x) * (0.2 - index * 0.018);
+          point.y += (y - point.y) * (0.2 - index * 0.018);
+          node.style.transform = `translate3d(${point.x}px, ${point.y}px, 0) translate(-50%, -50%) scale(${1 - index * 0.08})`;
+          node.style.opacity = `${0.48 - index * 0.06}`;
+        });
+      }
+      frame = window.requestAnimationFrame(render);
+    }
+
+    function handlePointerMove(event: PointerEvent) {
+      x = event.clientX;
+      y = event.clientY;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const ripple = document.createElement("span");
+      ripple.className = "click-ripple";
+      ripple.style.left = `${event.clientX}px`;
+      ripple.style.top = `${event.clientY}px`;
+      document.body.appendChild(ripple);
+      ripple.addEventListener("animationend", () => ripple.remove(), { once: true });
+    }
+
+    function handlePointerOver(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+      document.documentElement.dataset.cursor = target.closest("button, a, input, .repo-row") ? "active" : "idle";
+    }
+
+    function handleScroll() {
+      scrolling = true;
+      document.documentElement.dataset.scrolling = "true";
+      window.clearTimeout(scrollTimer);
+      scrollTimer = window.setTimeout(() => {
+        scrolling = false;
+        delete document.documentElement.dataset.scrolling;
+      }, 140);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("pointerover", handlePointerOver);
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    frame = window.requestAnimationFrame(render);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(scrollTimer);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("pointerover", handlePointerOver);
+      window.removeEventListener("scroll", handleScroll);
+    };
+  }, []);
+
+  return (
+    <>
+      <div className="aurora" aria-hidden="true" />
+      <div className="cursor-glow" ref={glowRef} aria-hidden="true" />
+      <div className="cursor-ring" ref={cursorRef} aria-hidden="true" />
+      <div className="cursor-dot" ref={dotRef} aria-hidden="true" />
+      {Array.from({ length: 3 }).map((_, index) => (
+        <div
+          className="cursor-trail"
+          key={index}
+          ref={(node) => {
+            trailRefs.current[index] = node;
+          }}
+          aria-hidden="true"
+        />
+      ))}
+    </>
   );
 }
 
@@ -207,6 +348,7 @@ function RadarApp({
   onLogout: () => void;
 }) {
   const t = text[locale];
+  const pageSize = 10;
   const tabs: Array<{ kind: ListKind; label: string; icon: ReactNode }> = [
     { kind: "hot", label: t.hot, icon: <Flame size={16} /> },
     { kind: "rising", label: t.rising, icon: <Rocket size={16} /> },
@@ -220,6 +362,7 @@ function RadarApp({
   const [items, setItems] = useState<RepoRankingItem[]>([]);
   const [summary, setSummary] = useState<DailySummary | null>(null);
   const [query, setQuery] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [analyzingRepo, setAnalyzingRepo] = useState<string | null>(null);
   const [analysisByRepo, setAnalysisByRepo] = useState<Record<string, RepoAiAnalysisResult>>({});
@@ -301,6 +444,20 @@ function RadarApp({
       return haystack.includes(keyword);
     });
   }, [items, query]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+  const pagedItems = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredItems.slice(start, start + pageSize);
+  }, [currentPage, filteredItems]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeKind, query, trendDays]);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, totalPages));
+  }, [totalPages]);
 
   async function handleScore() {
     setNotice(t.scoring);
@@ -420,10 +577,11 @@ function RadarApp({
       {loading && <div className="notice">{t.loading}</div>}
 
       <section className="repo-list">
-        {filteredItems.map((item) => (
+        {pagedItems.map((item, index) => (
           <RepoRow
             key={item.full_name}
             item={item}
+            index={index}
             t={t}
             analysis={analysisByRepo[item.full_name]}
             analyzing={analyzingRepo === item.full_name}
@@ -439,6 +597,39 @@ function RadarApp({
           </div>
         )}
       </section>
+
+      {!loading && filteredItems.length > pageSize && (
+        <nav className="pagination" aria-label="Repository pagination">
+          <span className="pagination-summary">
+            {t.pageRows.replace("{count}", formatNumber(filteredItems.length))}
+          </span>
+          <div className="pagination-controls">
+            <button
+              className="page-button"
+              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+              disabled={currentPage === 1}
+              aria-label={t.prevPage}
+              title={t.prevPage}
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="page-status">
+              {t.pageInfo
+                .replace("{page}", formatNumber(currentPage))
+                .replace("{total}", formatNumber(totalPages))}
+            </span>
+            <button
+              className="page-button"
+              onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+              disabled={currentPage === totalPages}
+              aria-label={t.nextPage}
+              title={t.nextPage}
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </nav>
+      )}
     </main>
   );
 }
@@ -654,6 +845,7 @@ function Distribution({
 
 function RepoRow({
   item,
+  index,
   t,
   analysis,
   analyzing,
@@ -662,6 +854,7 @@ function RepoRow({
   onAnalyze
 }: {
   item: RepoRankingItem;
+  index: number;
   t: Record<string, string>;
   analysis?: RepoAiAnalysisResult;
   analyzing: boolean;
@@ -672,8 +865,9 @@ function RepoRow({
   const summary = analysis?.trend_summary_zh || item.trend_summary_zh || item.summary_zh;
   const highlights = analysis?.highlights ?? [];
   const risks = analysis?.risk_flags ?? [];
+  const rowStyle = { "--row-index": index } as CSSProperties;
   return (
-    <article className="repo-row">
+    <article className="repo-row" style={rowStyle}>
       <div className="rank">#{item.rank ?? "-"}</div>
       <div className="repo-main">
         <div className="repo-title">
