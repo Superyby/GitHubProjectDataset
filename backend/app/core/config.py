@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     scheduler_minute: int = Field(default=0, ge=0, le=59)
 
     auth_token_expire_hours: int = Field(default=168, ge=1, le=24 * 30)
+    public_registration_enabled: bool = False
     email_code_expire_minutes: int = Field(default=10, ge=1, le=60)
     smtp_host: str | None = None
     smtp_port: int = 587
