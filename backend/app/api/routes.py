@@ -293,17 +293,31 @@ def all_repos(
 ) -> list[RepoRankingItem]:
     del current_user
     current_date = list_date or _default_read_date(db)
+    latest_snapshot = (
+        select(
+            GithubRepoDailySnapshot.repo_id,
+            func.max(GithubRepoDailySnapshot.snapshot_date).label("snapshot_date"),
+        )
+        .where(GithubRepoDailySnapshot.snapshot_date <= current_date)
+        .group_by(GithubRepoDailySnapshot.repo_id)
+        .subquery()
+    )
+    snapshot = aliased(GithubRepoDailySnapshot)
     stmt: Select = (
-        select(GithubRepo, GithubRepoDailySnapshot, GithubRepoDailyScore, RepoAiAnalysis)
-        .join(GithubRepoDailySnapshot, GithubRepoDailySnapshot.repo_id == GithubRepo.id)
+        select(GithubRepo, snapshot, GithubRepoDailyScore, RepoAiAnalysis)
+        .join(latest_snapshot, latest_snapshot.c.repo_id == GithubRepo.id)
+        .join(
+            snapshot,
+            (snapshot.repo_id == GithubRepo.id)
+            & (snapshot.snapshot_date == latest_snapshot.c.snapshot_date),
+        )
         .outerjoin(
             GithubRepoDailyScore,
             (GithubRepoDailyScore.repo_id == GithubRepo.id)
-            & (GithubRepoDailyScore.score_date == current_date),
+            & (GithubRepoDailyScore.score_date == snapshot.snapshot_date),
         )
         .outerjoin(RepoAiAnalysis, RepoAiAnalysis.repo_id == GithubRepo.id)
-        .where(GithubRepoDailySnapshot.snapshot_date == current_date)
-        .order_by(GithubRepoDailySnapshot.stars.desc())
+        .order_by(snapshot.stars.desc())
         .offset(offset)
         .limit(limit)
     )
