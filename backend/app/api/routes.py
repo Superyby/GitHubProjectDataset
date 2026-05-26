@@ -250,8 +250,10 @@ def rankings(
     if category:
         stmt = stmt.where(RepoAiAnalysis.category == category)
 
+    rows = db.execute(stmt).all()
+    trend_map = _trend_points_map(db, [repo.id for repo, *_ in rows], current_date)
     items = []
-    for repo, snapshot, score, analysis in db.execute(stmt).all():
+    for repo, snapshot, score, analysis in rows:
         items.append(
             RepoRankingItem(
                 full_name=repo.full_name,
@@ -274,7 +276,7 @@ def rankings(
                 summary_zh=analysis.summary_zh if analysis else None,
                 trend_summary_zh=analysis.trend_summary_zh if analysis else None,
                 trend_label=analysis.trend_label if analysis else None,
-                trend_points=[],
+                trend_points=trend_map.get(repo.id, []),
             )
         )
     return items

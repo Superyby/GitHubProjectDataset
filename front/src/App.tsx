@@ -74,6 +74,7 @@ const text = {
     trendPending: "\u8d8b\u52bf\u5f85\u5206\u6790",
     noDescription: "\u6682\u65e0\u63cf\u8ff0",
     delta7d: "7 \u65e5\u589e\u957f",
+    cumulativeDelta: "\u7d2f\u8ba1\u589e\u957f",
     deltaTopN: "\u5468\u671f\u589e\u957f",
     scoreMetric: "\u8bc4\u5206",
     trend: "\u8d8b\u52bf",
@@ -130,6 +131,7 @@ const text = {
     trendPending: "trend pending",
     noDescription: "No description",
     delta7d: "7d Delta",
+    cumulativeDelta: "Cumulative Delta",
     deltaTopN: "Period Delta",
     scoreMetric: "Score",
     trend: "Trend",
@@ -866,6 +868,10 @@ function RepoRow({
   const highlights = analysis?.highlights ?? [];
   const risks = analysis?.risk_flags ?? [];
   const rowStyle = { "--row-index": index } as CSSProperties;
+  const delta = displayDelta(item);
+  const metricLabel = deltaLabel === t.delta7d && item.history_days > 0 && item.history_days < 7
+    ? t.cumulativeDelta
+    : deltaLabel;
   return (
     <article className="repo-row" style={rowStyle}>
       <div className="rank">#{item.rank ?? "-"}</div>
@@ -901,7 +907,7 @@ function RepoRow({
       </div>
       <div className="metrics">
         <Metric label="Stars" value={formatNumber(item.stars)} />
-        <Metric label={deltaLabel} value={item.history_days > 0 ? `+${formatNumber(item.star_delta_7d)}` : "N/A"} highlight />
+        <Metric label={metricLabel} value={delta === null ? "N/A" : `+${formatNumber(delta)}`} highlight />
         <Metric label={t.scoreMetric} value={Number(item.score || 0).toFixed(2)} />
         <div className="spark-cell" aria-label={t.trend}>
           <Sparkline points={item.trend_points} />
@@ -913,6 +919,16 @@ function RepoRow({
       </div>
     </article>
   );
+}
+
+function displayDelta(item: RepoRankingItem) {
+  if (item.history_days === 0) {
+    return null;
+  }
+  if (item.history_days < 7 && item.trend_points.length >= 2) {
+    return Math.max(item.trend_points[item.trend_points.length - 1] - item.trend_points[0], 0);
+  }
+  return item.star_delta_7d;
 }
 
 function AnalysisList({ title, items }: { title: string; items: string[] }) {
